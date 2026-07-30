@@ -1,0 +1,70 @@
+{
+  "name": "pdf-manager-pro",
+  "version": "1.0.0",
+  "description": "Gestionnaire PDF Pro — organiser, fusionner, compresser, scinder, modifier, protéger, traduire, créer et convertir des PDF",
+  "main": "main.js",
+  "author": "Awesshhh",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "@cantoo/pdf-lib": "^2.7.4",
+    "sharp": "^0.35.3",
+    "pdfjs-dist": "^4.10.38",
+    "electron-updater": "^6.3.9"
+  },
+  "build": {
+    "appId": "com.pdfmanagerpro.app",
+    "productName": "PDF Manager Pro",
+    "directories": {
+      "output": "dist"
+    },
+    "asarUnpack": [
+      "node_modules/sharp/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Awessh",
+        "repo": "centralpdf", 
+        "private": true,
+        "releaseType": "release"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "app.js",
+      "styles.css",
+      "vendor/**",
+      "build/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PDF Manager Pro"
+    }
+  }
+}

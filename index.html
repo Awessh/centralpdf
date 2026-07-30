@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Central PDF Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+</head>
+
+<body>
+
+    <!-- ---------- Préchargeur (écran de démarrage animé) ---------- -->
+    <div id="preloader">
+        <div id="boot-logo">
+            <img src="medias/icon.png" alt="">
+        </div>
+        <div id="preloader-bar"><div id="preloader-bar-fill"></div></div>
+    </div>
+
+    <div id="app">
+
+        <!-- ---------- Barre latérale ---------- -->
+        <div id="sidebar">
+            <div id="brand">
+                <i class="fa-solid fa-file-pdf"></i>
+                <span>PDF Manager Pro</span>
+            </div>
+
+            <nav id="tool-nav">
+                <button class="tool-btn active" data-tool="organize"><i class="fa-solid fa-grip"></i><span>Organiser</span></button>
+                <button class="tool-btn" data-tool="merge"><i class="fa-solid fa-object-group"></i><span>Fusionner</span></button>
+                <button class="tool-btn" data-tool="compress"><i class="fa-solid fa-compress"></i><span>Compresser</span></button>
+                <button class="tool-btn" data-tool="split"><i class="fa-solid fa-scissors"></i><span>Scinder</span></button>
+                <button class="tool-btn" data-tool="edit"><i class="fa-solid fa-pen"></i><span>Modifier</span></button>
+                <button class="tool-btn" data-tool="protect"><i class="fa-solid fa-lock"></i><span>Protéger</span></button>
+                <button class="tool-btn" data-tool="translate"><i class="fa-solid fa-language"></i><span>Traduire</span></button>
+                <button class="tool-btn" data-tool="create"><i class="fa-solid fa-file-circle-plus"></i><span>Créer</span></button>
+                <button class="tool-btn" data-tool="convert"><i class="fa-solid fa-arrows-rotate"></i><span>Convertir</span></button>
+                <button class="tool-btn" data-tool="about"><i class="fa-solid fa-rotate"></i><span>A propos</span></button>
+            </nav>
+
+            <div id="tools-status">
+                <div class="tool-status-line" id="status-pdflib"><i class="fa-solid fa-circle-notch fa-spin"></i> Vérification…</div>
+                <div class="tool-status-line" id="status-sharp"></div>
+                <div class="tool-status-line" id="status-ghostscript"></div>
+                <div class="tool-status-line" id="status-office"></div>
+                <div class="tool-status-line" id="status-libreoffice"></div>
+                <button class="btn ghost small" id="recheck-tools-btn" style="margin-top:6px;"><i class="fa-solid fa-rotate"></i> Revérifier</button>
+            </div>
+        </div>
+
+        <!-- ---------- Contenu principal ---------- -->
+        <div id="main">
+
+            <!-- ===== Organiser ===== -->
+            <section class="panel active" id="panel-organize">
+                <header class="panel-header">
+                    <h1>Organiser un PDF</h1>
+                    <p>Réordonne, fais pivoter ou supprime des pages — en grille, avec aperçu du contenu.</p>
+                </header>
+
+                <div class="dropzone" id="organize-dropzone">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <p>Glisse un PDF ici ou</p>
+                    <button class="btn primary" id="organize-choose-btn">Choisir un fichier PDF</button>
+                </div>
+
+                <div class="workspace hidden" id="organize-workspace">
+                    <div class="file-chip" id="organize-file-chip"></div>
+                    <div class="page-grid" id="organize-page-grid"></div>
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="organize-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                        <button class="btn primary" id="organize-save-btn"><i class="fa-solid fa-floppy-disk"></i> Enregistrer sous…</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="organize-status"></div>
+            </section>
+
+            <!-- ===== Fusionner ===== -->
+            <section class="panel" id="panel-merge">
+                <header class="panel-header">
+                    <h1>Fusionner des PDF</h1>
+                    <p>Combine plusieurs fichiers PDF en un seul, dans l'ordre de ton choix.</p>
+                </header>
+
+                <div class="dropzone" id="merge-dropzone">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <p>Glisse des PDF ici ou</p>
+                    <button class="btn primary" id="merge-choose-btn">Ajouter des fichiers PDF</button>
+                </div>
+
+                <ul class="file-list" id="merge-file-list"></ul>
+
+                <div class="panel-actions hidden" id="merge-actions">
+                    <button class="btn ghost" id="merge-clear-btn"><i class="fa-solid fa-trash-can"></i> Vider la liste</button>
+                    <button class="btn primary" id="merge-run-btn"><i class="fa-solid fa-object-group"></i> Fusionner et enregistrer</button>
+                </div>
+
+                <div class="status-msg hidden" id="merge-status"></div>
+            </section>
+
+            <!-- ===== Compresser ===== -->
+            <section class="panel" id="panel-compress">
+                <header class="panel-header">
+                    <h1>Compresser un PDF</h1>
+                    <p>Réduit la taille du fichier pour l'envoyer ou le stocker plus facilement.</p>
+                </header>
+
+                <div class="dropzone" id="compress-dropzone">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <p>Glisse un PDF ici ou</p>
+                    <button class="btn primary" id="compress-choose-btn">Choisir un fichier PDF</button>
+                </div>
+
+                <div class="workspace hidden" id="compress-workspace">
+                    <div class="file-chip" id="compress-file-chip"></div>
+                    <div class="level-options">
+                        <label class="level-option">
+                            <input type="radio" name="compress-level" value="low">
+                            <div><strong>Compression légère</strong><span>Meilleure qualité, gain de place modéré</span></div>
+                        </label>
+                        <label class="level-option">
+                            <input type="radio" name="compress-level" value="medium" checked>
+                            <div><strong>Compression standard</strong><span>Bon équilibre qualité / taille (recommandé)</span></div>
+                        </label>
+                        <label class="level-option">
+                            <input type="radio" name="compress-level" value="high">
+                            <div><strong>Compression forte</strong><span>Fichier le plus léger, qualité réduite</span></div>
+                        </label>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="compress-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                        <button class="btn primary" id="compress-run-btn"><i class="fa-solid fa-compress"></i> Compresser et enregistrer</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="compress-status"></div>
+            </section>
+
+            <!-- ===== Scinder ===== -->
+            <section class="panel" id="panel-split">
+                <header class="panel-header">
+                    <h1>Scinder un PDF</h1>
+                    <p>Découpe le document en plusieurs fichiers.</p>
+                </header>
+
+                <div class="dropzone" id="split-dropzone">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <p>Glisse un PDF ici ou</p>
+                    <button class="btn primary" id="split-choose-btn">Choisir un fichier PDF</button>
+                </div>
+
+                <div class="workspace hidden" id="split-workspace">
+                    <div class="file-chip" id="split-file-chip"></div>
+
+                    <div class="field-group">
+                        <label>Mode de scission</label>
+                        <select id="split-mode">
+                            <option value="single">Une page par fichier</option>
+                            <option value="ranges">Plages personnalisées</option>
+                            <option value="every">Toutes les N pages</option>
+                        </select>
+                    </div>
+
+                    <div class="field-group hidden" id="split-ranges-field">
+                        <label>Plages (ex : 1-3,5,7-9)</label>
+                        <input type="text" id="split-ranges-input" placeholder="1-3,5,7-9">
+                    </div>
+
+                    <div class="field-group hidden" id="split-every-field">
+                        <label>Nombre de pages par fichier</label>
+                        <input type="number" id="split-every-input" min="1" value="1">
+                    </div>
+
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="split-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                        <button class="btn primary" id="split-run-btn"><i class="fa-solid fa-scissors"></i> Choisir le dossier et scinder</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="split-status"></div>
+                <ul class="file-list" id="split-results"></ul>
+            </section>
+
+            <!-- ===== Modifier ===== -->
+            <section class="panel" id="panel-edit">
+                <header class="panel-header">
+                    <h1>Modifier un PDF</h1>
+                    <p>Ajoute un texte / filigrane, ou insère des pages blanches.</p>
+                </header>
+
+                <div class="dropzone" id="edit-dropzone">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <p>Glisse un PDF ici ou</p>
+                    <button class="btn primary" id="edit-choose-btn">Choisir un fichier PDF</button>
+                </div>
+
+                <div class="workspace hidden" id="edit-workspace">
+                    <div class="file-chip" id="edit-file-chip"></div>
+
+                    <div class="edit-tabs">
+                        <button class="edit-tab-btn active" data-edit-tab="watermark">Texte / filigrane</button>
+                        <button class="edit-tab-btn" data-edit-tab="blank">Pages blanches</button>
+                    </div>
+
+                    <div class="edit-tab-panel active" id="edit-tab-watermark">
+                        <div class="field-group">
+                            <label>Texte</label>
+                            <input type="text" id="wm-text" placeholder="Ex : CONFIDENTIEL, Brouillon, © Mon entreprise…">
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group"><label>Taille de police</label><input type="number" id="wm-size" value="40" min="6" max="300"></div>
+                            <div class="field-group"><label>Couleur</label><input type="color" id="wm-color" value="#ff3b3b"></div>
+                            <div class="field-group"><label>Opacité (<span id="wm-opacity-val">35</span>%)</label><input type="range" id="wm-opacity" min="5" max="100" value="35"></div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group"><label>Rotation (degrés)</label><input type="number" id="wm-rotation" value="45" min="-180" max="180"></div>
+                            <div class="field-group">
+                                <label>Position</label>
+                                <select id="wm-position">
+                                    <option value="center">Centre</option>
+                                    <option value="top-left">Haut gauche</option>
+                                    <option value="top-right">Haut droite</option>
+                                    <option value="bottom-left">Bas gauche</option>
+                                    <option value="bottom-right">Bas droite</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label>Pages concernées (vide = toutes)</label>
+                            <input type="text" id="wm-pages" placeholder="Ex : 1-3,5">
+                        </div>
+                        <div class="panel-actions">
+                            <button class="btn primary" id="wm-run-btn"><i class="fa-solid fa-stamp"></i> Appliquer et enregistrer</button>
+                        </div>
+                    </div>
+
+                    <div class="edit-tab-panel" id="edit-tab-blank">
+                        <div class="field-row">
+                            <div class="field-group"><label>Insérer après la page n°</label><input type="number" id="blank-after" value="0" min="0"><span class="hint">0 = au tout début</span></div>
+                            <div class="field-group"><label>Nombre de pages à insérer</label><input type="number" id="blank-count" value="1" min="1"></div>
+                        </div>
+                        <div class="panel-actions">
+                            <button class="btn primary" id="blank-run-btn"><i class="fa-solid fa-file-circle-plus"></i> Insérer et enregistrer</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="edit-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="edit-status"></div>
+            </section>
+
+            <!-- ===== Protéger ===== -->
+            <section class="panel" id="panel-protect">
+                <header class="panel-header">
+                    <h1>Protéger un PDF</h1>
+                    <p>Ajoute un mot de passe et des permissions, ou retire une protection existante.</p>
+                </header>
+
+                <div class="edit-tabs">
+                    <button class="protect-tab-btn active" data-protect-tab="add">Ajouter une protection</button>
+                    <button class="protect-tab-btn" data-protect-tab="remove">Retirer la protection</button>
+                </div>
+
+                <!-- --- Ajouter une protection --- -->
+                <div class="protect-tab-panel active" id="protect-tab-add">
+                    <div class="dropzone" id="protect-add-dropzone">
+                        <i class="fa-solid fa-file-arrow-up"></i>
+                        <p>Glisse un PDF ici ou</p>
+                        <button class="btn primary" id="protect-add-choose-btn">Choisir un fichier PDF</button>
+                    </div>
+
+                    <div class="workspace hidden" id="protect-add-workspace">
+                        <div class="file-chip" id="protect-add-file-chip"></div>
+
+                        <div class="field-row">
+                            <div class="field-group">
+                                <label>Mot de passe d'ouverture (obligatoire pour ouvrir le PDF)</label>
+                                <input type="password" id="protect-user-pwd" placeholder="Laisser vide si non souhaité">
+                            </div>
+                            <div class="field-group">
+                                <label>Mot de passe propriétaire (permissions)</label>
+                                <input type="password" id="protect-owner-pwd" placeholder="Optionnel — sinon = mot de passe d'ouverture">
+                            </div>
+                        </div>
+
+                        <div class="field-group">
+                            <label>Permissions accordées à un lecteur avec le mot de passe d'ouverture</label>
+                            <div class="perm-grid">
+                                <label class="perm-check"><input type="checkbox" id="perm-printing" checked> Impression</label>
+                                <label class="perm-check"><input type="checkbox" id="perm-modifying"> Modification du contenu</label>
+                                <label class="perm-check"><input type="checkbox" id="perm-copying"> Copie de texte / images</label>
+                                <label class="perm-check"><input type="checkbox" id="perm-annotating" checked> Annotations</label>
+                                <label class="perm-check"><input type="checkbox" id="perm-fillingForms" checked> Remplir des formulaires</label>
+                                <label class="perm-check"><input type="checkbox" id="perm-documentAssembly"> Assemblage (pages, signets)</label>
+                            </div>
+                        </div>
+
+                        <div class="panel-actions">
+                            <button class="btn ghost" id="protect-add-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                            <button class="btn primary" id="protect-add-run-btn"><i class="fa-solid fa-lock"></i> Protéger et enregistrer</button>
+                        </div>
+                    </div>
+
+                    <div class="status-msg hidden" id="protect-add-status"></div>
+                </div>
+
+                <!-- --- Retirer la protection --- -->
+                <div class="protect-tab-panel" id="protect-tab-remove">
+                    <div class="dropzone" id="protect-remove-dropzone">
+                        <i class="fa-solid fa-file-arrow-up"></i>
+                        <p>Glisse un PDF protégé ici ou</p>
+                        <button class="btn primary" id="protect-remove-choose-btn">Choisir un fichier PDF</button>
+                    </div>
+
+                    <div class="workspace hidden" id="protect-remove-workspace">
+                        <div class="file-chip" id="protect-remove-file-chip"></div>
+                        <div class="field-group">
+                            <label>Mot de passe actuel du document</label>
+                            <input type="password" id="protect-remove-pwd" placeholder="Mot de passe">
+                        </div>
+                        <div class="panel-actions">
+                            <button class="btn ghost" id="protect-remove-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                            <button class="btn primary" id="protect-remove-run-btn"><i class="fa-solid fa-lock-open"></i> Retirer et enregistrer</button>
+                        </div>
+                    </div>
+
+                    <div class="status-msg hidden" id="protect-remove-status"></div>
+                </div>
+            </section>
+
+            <!-- ===== Traduire ===== -->
+            <section class="panel" id="panel-translate">
+                <header class="panel-header">
+                    <h1>Traduire un PDF</h1>
+                    <p>Extrait le texte, le traduit puis génère un nouveau PDF. La mise en page d'origine n'est pas conservée (texte reflowé).</p>
+                </header>
+
+                <div class="dropzone" id="translate-dropzone">
+                    <i class="fa-solid fa-file-arrow-up"></i>
+                    <p>Glisse un PDF ici ou</p>
+                    <button class="btn primary" id="translate-choose-btn">Choisir un fichier PDF</button>
+                </div>
+
+                <div class="workspace hidden" id="translate-workspace">
+                    <div class="file-chip" id="translate-file-chip"></div>
+
+                    <div class="field-row">
+                        <div class="field-group">
+                            <label>Langue source</label>
+                            <select id="translate-source">
+                                <option value="auto" selected>Détection automatique</option>
+                                <option value="fr">Français</option>
+                                <option value="en">Anglais</option>
+                                <option value="es">Espagnol</option>
+                                <option value="pt">Portugais</option>
+                                <option value="ar">Arabe</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label>Langue cible</label>
+                            <select id="translate-target">
+                                <option value="en">Anglais</option>
+                                <option value="fr" selected>Français</option>
+                                <option value="es">Espagnol</option>
+                                <option value="pt">Portugais</option>
+                                <option value="de">Allemand</option>
+                                <option value="ar">Arabe</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="translate-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
+                        <button class="btn primary" id="translate-run-btn"><i class="fa-solid fa-language"></i> Traduire et enregistrer</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="translate-status"></div>
+            </section>
+
+            <!-- ===== Créer ===== -->
+            <section class="panel" id="panel-create">
+                <header class="panel-header">
+                    <h1>Créer un PDF</h1>
+                    <p>Compose un document à partir de zéro : texte, images, pages multiples.</p>
+                </header>
+
+                <!-- Étape 1 : configuration -->
+                <div id="create-setup">
+                    <div class="field-row">
+                        <div class="field-group">
+                            <label>Format de page</label>
+                            <select id="create-format">
+                                <option value="a4">A4</option>
+                                <option value="letter">Letter</option>
+                                <option value="a5">A5</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label>Orientation</label>
+                            <select id="create-orientation">
+                                <option value="portrait">Portrait</option>
+                                <option value="landscape">Paysage</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label>Nombre de pages initial</label>
+                            <input type="number" id="create-page-count" min="1" max="50" value="1">
+                        </div>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="btn primary" id="create-start-btn"><i class="fa-solid fa-plus"></i> Créer le document</button>
+                    </div>
+                </div>
+
+                <!-- Étape 2 : éditeur -->
+                <div class="workspace hidden" id="create-editor">
+                    <div class="creator-layout">
+                        <div class="creator-pages-col">
+                            <div class="creator-pages-list" id="create-pages-list"></div>
+                            <button class="btn ghost small" id="create-add-page-btn"><i class="fa-solid fa-plus"></i> Ajouter une page</button>
+                        </div>
+
+                        <div class="creator-canvas-col">
+                            <div class="creator-toolbar">
+                                <button class="btn ghost small" id="create-add-text-btn"><i class="fa-solid fa-font"></i> Texte</button>
+                                <button class="btn ghost small" id="create-add-image-btn"><i class="fa-solid fa-image"></i> Image</button>
+                                <button class="btn ghost small" id="create-add-rect-btn"><i class="fa-solid fa-square"></i> Rectangle</button>
+                                <label class="bg-color-label">Fond <input type="color" id="create-bg-color" value="#ffffff"></label>
+                                <button class="btn ghost small danger" id="create-delete-page-btn"><i class="fa-solid fa-trash-can"></i> Supprimer la page</button>
+                            </div>
+                            <div class="creator-stage-wrap">
+                                <div class="creator-stage" id="create-stage"></div>
+                            </div>
+                        </div>
+
+                        <div class="creator-inspector-col" id="create-inspector">
+                            <p class="inspector-empty">Sélectionne un élément pour modifier ses propriétés.</p>
+                        </div>
+                    </div>
+
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="create-reset-btn"><i class="fa-solid fa-rotate-left"></i> Nouveau document</button>
+                        <button class="btn primary" id="create-save-btn"><i class="fa-solid fa-floppy-disk"></i> Enregistrer sous…</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="create-status"></div>
+            </section>
+
+            <!-- ===== Convertir ===== -->
+            <section class="panel" id="panel-convert">
+                <header class="panel-header">
+                    <h1>Conversion PDF</h1>
+                    <p>Convertis un document vers ou depuis Word, Excel, PowerPoint et HTML.</p>
+                </header>
+
+                <div class="convert-grid" id="convert-grid">
+                    <button class="convert-card" data-src="docx" data-target="pdf" data-exts="docx,doc"><i class="fa-solid fa-file-word"></i><span>Word → PDF</span></button>
+                    <button class="convert-card" data-src="pdf" data-target="docx" data-exts="pdf"><i class="fa-solid fa-file-pdf"></i><span>PDF → Word</span></button>
+                    <button class="convert-card" data-src="xlsx" data-target="pdf" data-exts="xlsx,xls"><i class="fa-solid fa-file-excel"></i><span>Excel → PDF</span></button>
+                    <button class="convert-card" data-src="pdf" data-target="xlsx" data-exts="pdf"><i class="fa-solid fa-file-pdf"></i><span>PDF → Excel</span></button>
+                    <button class="convert-card" data-src="pptx" data-target="pdf" data-exts="pptx,ppt"><i class="fa-solid fa-file-powerpoint"></i><span>PowerPoint → PDF</span></button>
+                    <button class="convert-card" data-src="html" data-target="pdf" data-exts="html,htm"><i class="fa-solid fa-file-code"></i><span>HTML → PDF</span></button>
+                    <button class="convert-card" data-src="pdf" data-target="html" data-exts="pdf"><i class="fa-solid fa-file-pdf"></i><span>PDF → HTML</span></button>
+                </div>
+
+                <div class="workspace hidden" id="convert-workspace">
+                    <div class="panel-actions">
+                        <button class="btn primary" id="convert-choose-btn"><i class="fa-solid fa-file-arrow-up"></i> Choisir le fichier source</button>
+                    </div>
+                    <div class="file-chip hidden" id="convert-file-chip"></div>
+                    <div class="panel-actions">
+                        <button class="btn ghost" id="convert-reset-btn"><i class="fa-solid fa-rotate-left"></i> Choisir une autre conversion</button>
+                        <button class="btn primary" id="convert-run-btn" disabled><i class="fa-solid fa-arrows-rotate"></i> Convertir et enregistrer</button>
+                    </div>
+                </div>
+
+                <div class="status-msg hidden" id="convert-status"></div>
+            </section>
+
+            <!-- Onglet À propos -->
+            <section class="panel" id="panel-about">
+                <header class="panel-header">
+                    <h1>À propos</h1>
+                    <p>Onglet de gestion des mises à jour.</p>
+                </header>
+                <div class="about-app-row">
+                    <img src="medias/icon.png">
+                    <div>
+                    <h3 class="about-app-name">Central Pdf Manager</h3>
+                    <div class="about-app-version">Version <span id="about-version">…</span></div>
+                    </div>
+                </div>
+                <div class="about-update-row">
+                    <button id="about-check-btn" class="settings-nav-btn about-check-btn" type="button"><i class="fa-solid fa-arrows-rotate"></i> Rechercher des mises à jour</button>
+                    <div id="about-update-status" class="about-update-status">Statut inconnu.</div>
+                </div>
+                <button id="about-install-btn" class="about-install-btn hidden" type="button"><i class="fa-solid fa-rotate-right"></i> Redémarrer et installer la mise à jour</button>
+                </div>
+            </section>
+
+        </div>
+    </div>
+
+    <!-- ---------- Modale mot de passe (PDF protégés) ---------- -->
+    <div class="modal-overlay hidden" id="password-modal">
+        <div class="modal-box">
+            <h3><i class="fa-solid fa-lock"></i> Ce PDF est protégé</h3>
+            <p>Indique le mot de passe pour continuer.</p>
+            <input type="password" id="password-modal-input" placeholder="Mot de passe">
+            <div class="modal-actions">
+                <button class="btn ghost" id="password-modal-cancel">Annuler</button>
+                <button class="btn primary" id="password-modal-ok">Valider</button>
+            </div>
+            <p class="status-msg error hidden" id="password-modal-error"></p>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
