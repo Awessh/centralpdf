@@ -1,5 +1,5 @@
 {
-  "name": "pdf-manager-pro",
+  "name": "central-pdf-manager",
   "version": "1.0.0",
   "description": "Gestionnaire PDF Pro — organiser, fusionner, compresser, scinder, modifier, protéger, traduire, créer et convertir des PDF",
   "main": "main.js",
@@ -24,7 +24,7 @@
   },
   "build": {
     "appId": "com.pdfmanagerpro.app",
-    "productName": "PDF Manager Pro",
+    "productName": "Central PDF Manager",
     "directories": {
       "output": "dist"
     },
@@ -64,7 +64,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "PDF Manager Pro"
+      "shortcutName": "Central PDF Manager"
     }
   }
 }
