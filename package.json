@@ -1,6 +1,6 @@
 {
   "name": "central-pdf-manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Gestionnaire PDF Pro — organiser, fusionner, compresser, scinder, modifier, protéger, traduire, créer et convertir des PDF",
   "main": "main.js",
   "author": "Awesshhh",
@@ -47,7 +47,8 @@
       "app.js",
       "styles.css",
       "vendor/**",
-      "build/**"
+      "build/**",
+      "src/**"
     ],
     "win": {
       "target": [
