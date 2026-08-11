@@ -14,11 +14,6 @@
 // Ne jamais réutiliser ici un jeton ayant des droits plus larges (écriture,
 // autres dépôts...) — celui utilisé pour PUBLIER les Releases (GH_TOKEN au
 // moment du build) doit rester un jeton différent, jamais mis dans ce fichier.
-function ensureUpdateToken() {
-  if (!process.env.GH_TOKEN) {
-    process.env.GH_TOKEN = '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';
-  }
-}
 
 let autoUpdater = null;
 let loadError = null;
@@ -51,7 +46,6 @@ function initUpdater({ app, ipcMain, dialog, BrowserWindow }) {
       setStatus('unsupported', { info: { reason: 'module-missing', message: String(loadError?.message || loadError || '') } });
       return status;
     }
-    ensureUpdateToken();
     setStatus('checking');
     autoUpdater.checkForUpdates().catch((err) => {
       setStatus('error', { info: { message: String(err?.message || err) } });
