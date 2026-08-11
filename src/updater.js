@@ -79,7 +79,7 @@ function initUpdater({ app, ipcMain, dialog, BrowserWindow }) {
       dialog.showMessageBox({
         type: 'info',
         title: 'Mise à jour disponible',
-        message: `Central Share ${info.version} a été téléchargée.`,
+        message: `Central PDF Manager ${info.version} a été téléchargée.`,
         detail: "Elle sera installée automatiquement à la prochaine fermeture, ou tu peux redémarrer maintenant.",
         buttons: ['Redémarrer maintenant', 'Plus tard'],
         defaultId: 0,

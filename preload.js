@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
     // ---------- Créateur PDF ----------
     pdfCreate: (payload) => ipcRenderer.invoke('pdf:create', payload),
     chooseImageFile: () => ipcRenderer.invoke('pdf:choose-image'),
+    pdfListFonts: () => ipcRenderer.invoke('pdf:list-fonts'),
 
     // ---------- Convertir ----------
     pdfConvert: (payload) => ipcRenderer.invoke('pdf:convert', payload),

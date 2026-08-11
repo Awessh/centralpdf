@@ -43,7 +43,6 @@
             <div id="tools-status">
                 <div class="tool-status-line" id="status-pdflib"><i class="fa-solid fa-circle-notch fa-spin"></i> Vérification…</div>
                 <div class="tool-status-line" id="status-sharp"></div>
-                <div class="tool-status-line" id="status-ghostscript"></div>
                 <div class="tool-status-line" id="status-office"></div>
                 <div class="tool-status-line" id="status-libreoffice"></div>
                 <button class="btn ghost small" id="recheck-tools-btn" style="margin-top:6px;"><i class="fa-solid fa-rotate"></i> Revérifier</button>
@@ -207,15 +206,38 @@
 
                     <div class="edit-tab-panel active" id="edit-tab-watermark">
                         <div class="field-group">
+                            <label>Type de filigrane</label>
+                            <div class="wm-type-toggle">
+                                <button type="button" class="wm-type-btn active" data-wm-type="text"><i class="fa-solid fa-font"></i> Texte</button>
+                                <button type="button" class="wm-type-btn" data-wm-type="image"><i class="fa-solid fa-image"></i> Image (logo)</button>
+                            </div>
+                        </div>
+
+                        <div id="wm-text-fields">
+                            <div class="field-group">
                             <label>Texte</label>
                             <input type="text" id="wm-text" placeholder="Ex : CONFIDENTIEL, Brouillon, © Mon entreprise…">
                         </div>
                         <div class="field-row">
                             <div class="field-group"><label>Taille de police</label><input type="number" id="wm-size" value="40" min="6" max="300"></div>
                             <div class="field-group"><label>Couleur</label><input type="color" id="wm-color" value="#ff3b3b"></div>
-                            <div class="field-group"><label>Opacité (<span id="wm-opacity-val">35</span>%)</label><input type="range" id="wm-opacity" min="5" max="100" value="35"></div>
+                            </div>
                         </div>
+
+                        <div id="wm-image-fields" class="hidden">
+                            <div class="field-group">
+                                <label>Image du filigrane</label>
+                                <button type="button" class="btn ghost small" id="wm-choose-image-btn"><i class="fa-solid fa-image"></i> Choisir une image (PNG/JPG)</button>
+                                <span class="hint" id="wm-image-name"></span>
+                            </div>
+                            <div class="field-group">
+                                <label>Largeur du logo (<span id="wm-image-width-val">30</span>% de la largeur de page)</label>
+                                <input type="range" id="wm-image-width" min="5" max="100" value="30">
+                            </div>
+                        </div>
+
                         <div class="field-row">
+                            <div class="field-group"><label>Opacité (<span id="wm-opacity-val">35</span>%)</label><input type="range" id="wm-opacity" min="5" max="100" value="35"></div>
                             <div class="field-group"><label>Rotation (degrés)</label><input type="number" id="wm-rotation" value="45" min="-180" max="180"></div>
                             <div class="field-group">
                                 <label>Position</label>
@@ -432,6 +454,8 @@
                                 <button class="btn ghost small" id="create-add-text-btn"><i class="fa-solid fa-font"></i> Texte</button>
                                 <button class="btn ghost small" id="create-add-image-btn"><i class="fa-solid fa-image"></i> Image</button>
                                 <button class="btn ghost small" id="create-add-rect-btn"><i class="fa-solid fa-square"></i> Rectangle</button>
+                                <button class="btn ghost small" id="create-add-circle-btn"><i class="fa-solid fa-circle"></i> Cercle</button>
+                                <button class="btn ghost small" id="create-add-triangle-btn"><i class="fa-solid fa-play fa-rotate-90"></i> Triangle</button>
                                 <label class="bg-color-label">Fond <input type="color" id="create-bg-color" value="#ffffff"></label>
                                 <button class="btn ghost small danger" id="create-delete-page-btn"><i class="fa-solid fa-trash-can"></i> Supprimer la page</button>
                             </div>
@@ -450,8 +474,6 @@
                         <button class="btn primary" id="create-save-btn"><i class="fa-solid fa-floppy-disk"></i> Enregistrer sous…</button>
                     </div>
                 </div>
-
-                <div class="status-msg hidden" id="create-status"></div>
             </section>
 
             <!-- ===== Convertir ===== -->
@@ -492,7 +514,6 @@
                     <p>Onglet de gestion des mises à jour.</p>
                 </header>
                 <div class="about-app-row">
-                    <img src="medias/icon.png">
                     <div>
                     <h3 class="about-app-name">Central Pdf Manager</h3>
                     <div class="about-app-version">Version <span id="about-version">…</span></div>
@@ -522,6 +543,21 @@
             <p class="status-msg error hidden" id="password-modal-error"></p>
         </div>
     </div>
+
+    <!-- ---------- Modale de confirmation générique ---------- -->
+    <div class="modal-overlay hidden" id="confirm-modal">
+        <div class="modal-box">
+            <h3><i class="fa-solid fa-triangle-exclamation"></i> Confirmation</h3>
+            <p id="confirm-modal-message"></p>
+            <div class="modal-actions">
+                <button class="btn ghost" id="confirm-modal-cancel">Annuler</button>
+                <button class="btn primary" id="confirm-modal-ok">Continuer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---------- Toasts (notifications flottantes) ---------- -->
+    <div id="toast-container"></div>
 
     <script type="module" src="app.js"></script>
 </body>

@@ -4,6 +4,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 const { spawn, spawnSync } = require('child_process');
+const zlib = require('zlib');
 const { initUpdater } = require('./src/updater');
 
 // ------------------------------------------------------------
@@ -40,22 +41,14 @@ try {
 // pdfjs-dist (build "legacy", sans dépendance canvas) : utilisé uniquement
 // pour EXTRAIRE le texte des pages (fonction Traduire). Le rendu visuel des
 // vignettes, lui, est fait côté renderer (Chromium a un vrai <canvas>).
-let pdfjsExtract = null;
+// IMPORTANT : pdfjs-dist est distribué en ESM (.mjs) — require() ne peut pas
+// charger un module ESM (il lève une erreur), il faut un import() dynamique.
+let pdfjsExtractPromise = null;
 function getPdfjsExtract() {
-    if (pdfjsExtract) return pdfjsExtract;
-    try {
-        // eslint-disable-next-line global-require
-        pdfjsExtract = require('pdfjs-dist/legacy/build/pdf.mjs');
-    } catch {
-        try {
-            // Certaines versions n'exposent que le require CJS classique.
-            // eslint-disable-next-line global-require
-            pdfjsExtract = require('pdfjs-dist/legacy/build/pdf.js');
-        } catch {
-            pdfjsExtract = null;
-        }
+    if (!pdfjsExtractPromise) {
+        pdfjsExtractPromise = import('pdfjs-dist/legacy/build/pdf.mjs').catch(() => null);
     }
-    return pdfjsExtract;
+    return pdfjsExtractPromise;
 }
 
 // ------------------------------------------------------------
@@ -93,7 +86,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
 
 // ------------------------------------------------------------
-// Lancement de processus externes (LibreOffice, Ghostscript, PowerShell/COM)
+// Lancement de processus externes (LibreOffice, PowerShell/COM)
 // ------------------------------------------------------------
 function needsWindowsShell(bin) {
     return process.platform === 'win32' && !bin.includes('\\') && !bin.includes('/');
@@ -150,7 +143,6 @@ function trySpawnSyncVersion(bin, args) {
 
 // ---- Détection des outils externes optionnels (mise en cache) ----
 let cachedSofficePath;
-let cachedGsPath;
 let cachedWordAvailable;
 let cachedExcelAvailable;
 let cachedPowerPointAvailable;
@@ -174,30 +166,6 @@ function locateSoffice() {
         if (trySpawnSyncVersion(c, ['--version'])) { cachedSofficePath = c; return c; }
     }
     cachedSofficePath = null;
-    return null;
-}
-
-function locateGhostscript() {
-    if (cachedGsPath !== undefined) return cachedGsPath;
-    const candidates = process.platform === 'win32' ? ['gswin64c', 'gswin32c'] : ['gs'];
-    for (const c of candidates) {
-        if (trySpawnSyncVersion(c, ['-v'])) { cachedGsPath = c; return c; }
-    }
-    if (process.platform === 'win32') {
-        for (const base of [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']].filter(Boolean)) {
-            const gsDir = path.join(base, 'gs');
-            if (!fs.existsSync(gsDir)) continue;
-            try {
-                for (const version of fs.readdirSync(gsDir)) {
-                    for (const exeName of ['gswin64c.exe', 'gswin32c.exe']) {
-                        const exe = path.join(gsDir, version, 'bin', exeName);
-                        if (fs.existsSync(exe)) { cachedGsPath = exe; return exe; }
-                    }
-                }
-            } catch { /* ignore */ }
-        }
-    }
-    cachedGsPath = null;
     return null;
 }
 
@@ -466,7 +434,15 @@ async function pdfSplit({ filePath, mode, ranges, everyN, outputDir }) {
     return { files: outFiles };
 }
 
-// ---- Compresser ----
+// ---- Compresser (100% JavaScript, aucun outil externe requis) ----
+function colorSpaceChannels(dict, PDFName) {
+    const cs = dict.get(PDFName.of('ColorSpace'));
+    const csStr = cs ? cs.toString() : '';
+    if (csStr.includes('DeviceGray') || csStr.includes('CalGray')) return 1;
+    if (csStr.includes('DeviceRGB') || csStr.includes('CalRGB')) return 3;
+    return null; // CMYK, Indexed, ICCBased... non gérés nativement : on laisse l'image telle quelle
+}
+
 async function pdfCompressNative({ filePath, level, outputPath }) {
     if (!sharpLib) return null;
     const { PDFName, PDFRawStream } = ensurePdfLib();
@@ -483,19 +459,47 @@ async function pdfCompressNative({ filePath, level, outputPath }) {
         const dict = obj.dict;
         const subtype = dict.get(PDFName.of('Subtype'));
         if (!subtype || subtype.toString() !== '/Image') continue;
+        if (dict.get(PDFName.of('SMask')) || dict.get(PDFName.of('Mask'))) continue; // on ne touche pas aux images avec transparence (risque de perte du canal alpha)
+
         const filter = dict.get(PDFName.of('Filter'));
         const filterStr = filter ? filter.toString() : '';
-        if (!filterStr.includes('DCTDecode')) continue;
+        const raw = Buffer.from(obj.contents);
+
         try {
-            const raw = Buffer.from(obj.contents);
-            const meta = await sharpLib(raw).metadata();
-            let pipeline = sharpLib(raw).jpeg({ quality, mozjpeg: true });
+            let sharpInput;
+            if (filterStr.includes('DCTDecode')) {
+                // Déjà un JPEG : on le ré-encode simplement à une qualité/résolution plus basse.
+                sharpInput = raw;
+            } else if (filterStr.includes('FlateDecode')) {
+                // Image bitmap brute (compressée sans perte) : Gray ou RGB 8 bits uniquement.
+                const bpc = dict.get(PDFName.of('BitsPerComponent'));
+                const bitsPerComponent = bpc ? parseInt(bpc.toString(), 10) : null;
+                const channels = colorSpaceChannels(dict, PDFName);
+                if (bitsPerComponent !== 8 || !channels) continue;
+                const width = parseInt(dict.get(PDFName.of('Width')).toString(), 10);
+                const height = parseInt(dict.get(PDFName.of('Height')).toString(), 10);
+                const pixels = zlib.inflateSync(raw);
+                if (pixels.length < width * height * channels) continue; // flux inattendu, on n'y touche pas
+                sharpInput = { raw: { width, height, channels }, buffer: pixels };
+            } else {
+                continue; // filtre non géré (JPXDecode, CCITTFax...) : on laisse tel quel
+            }
+
+            const source = sharpInput.buffer
+                ? sharpLib(sharpInput.buffer, { raw: sharpInput.raw })
+                : sharpLib(sharpInput);
+            const meta = filterStr.includes('DCTDecode') ? await sharpLib(raw).metadata() : sharpInput.raw;
+            let pipeline = source.jpeg({ quality, mozjpeg: true });
             if (meta.width > maxDim || meta.height > maxDim) {
                 pipeline = pipeline.resize({ width: maxDim, height: maxDim, fit: 'inside', withoutEnlargement: true });
             }
             const newBuf = await pipeline.toBuffer();
             if (newBuf.length >= raw.length) continue;
+
             obj.contents = newBuf;
+            dict.set(PDFName.of('Filter'), PDFName.of('DCTDecode'));
+            dict.delete(PDFName.of('DecodeParms'));
+            dict.delete(PDFName.of('Decode'));
             dict.set(PDFName.of('Length'), doc.context.obj(newBuf.length));
             if (meta.width > maxDim || meta.height > maxDim) {
                 const newMeta = await sharpLib(newBuf).metadata();
@@ -503,7 +507,7 @@ async function pdfCompressNative({ filePath, level, outputPath }) {
                 dict.set(PDFName.of('Height'), doc.context.obj(newMeta.height));
             }
             touched += 1;
-        } catch { /* image illisible, on la laisse inchangée */ }
+        } catch { /* image illisible ou format non géré : on la laisse inchangée */ }
     }
 
     if (touched === 0) return null;
@@ -518,19 +522,9 @@ async function pdfCompress({ filePath, level, outputPath }) {
     const native = await pdfCompressNative({ filePath, level, outputPath });
     if (native) return native;
 
-    const gsBin = locateGhostscript();
-    if (gsBin) {
-        const settingMap = { low: '/screen', medium: '/ebook', high: '/printer' };
-        await runProcess(gsBin, [
-            '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
-            `-dPDFSETTINGS=${settingMap[level] || '/ebook'}`,
-            '-dNOPAUSE', '-dQUIET', '-dBATCH',
-            `-sOutputFile=${outputPath}`, filePath,
-        ]);
-        const after = fs.statSync(outputPath).size;
-        return { engine: 'ghostscript', before, after };
-    }
-
+    // Aucune image compressible trouvée (ou 'sharp' indisponible) : on se
+    // rabat uniquement sur l'optimisation de la structure du PDF, en JS pur
+    // (plus aucune dépendance à un outil externe comme Ghostscript).
     const doc = await loadPdf(filePath);
     fs.writeFileSync(outputPath, await doc.save({ useObjectStreams: true }));
     const after = fs.statSync(outputPath).size;
@@ -541,41 +535,84 @@ async function pdfCompress({ filePath, level, outputPath }) {
         warning: !sharpLib
             ? "Le module 'sharp' est introuvable : compression d'images limitée. Lance "
               + "`npm install` à la racine du projet puis relance l'application."
-            : 'Aucune image JPEG compressible détectée dans ce PDF : seule la structure a été optimisée.',
+            : "Aucune image compressible détectée dans ce PDF (JPEG ou bitmap Gray/RGB) : seule la structure a été optimisée.",
     };
 }
 
 // ---- Modifier : filigrane / texte libre ----
-async function pdfAddWatermark({ filePath, text, opacity, fontSize, color, rotationDeg, position, pagesSpec, outputPath }) {
+// Calcule le point d'ancrage (bas-gauche, repère PDF) à utiliser pour que,
+// une fois la rotation appliquée par pdf-lib (qui pivote autour de ce point
+// d'ancrage et non autour du centre visuel), le CENTRE VISUEL de l'élément
+// tombe exactement sur (targetCenterX, targetCenterY). C'est ce calcul qui
+// manquait : sans lui, un filigrane pivoté (ex : 45°) apparaît décalé.
+function rotatedAnchor(targetCenterX, targetCenterY, halfWidth, halfHeight, rotationDeg) {
+    const theta = ((rotationDeg || 0) * Math.PI) / 180;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    const rotatedDX = halfWidth * cos - halfHeight * sin;
+    const rotatedDY = halfWidth * sin + halfHeight * cos;
+    return { x: targetCenterX - rotatedDX, y: targetCenterY - rotatedDY };
+}
+
+function watermarkTargetCenter(position, width, height, halfWidth, halfHeight, margin) {
+    switch (position) {
+        case 'top-left': return { cx: margin + halfWidth, cy: height - margin - halfHeight };
+        case 'top-right': return { cx: width - margin - halfWidth, cy: height - margin - halfHeight };
+        case 'bottom-left': return { cx: margin + halfWidth, cy: margin + halfHeight };
+        case 'bottom-right': return { cx: width - margin - halfWidth, cy: margin + halfHeight };
+        default: return { cx: width / 2, cy: height / 2 };
+    }
+}
+
+async function pdfAddWatermark({
+    filePath, type, text, imagePath, imageWidthPct, opacity, fontSize, color, rotationDeg, position, pagesSpec, outputPath,
+}) {
     const { rgb, degrees, StandardFonts } = ensurePdfLib();
-    if (!text || !text.trim()) throw new Error('Indique le texte du filigrane.');
+    const isImage = type === 'image';
+    if (isImage && !imagePath) throw new Error('Choisis une image à utiliser comme filigrane.');
+    if (!isImage && (!text || !text.trim())) throw new Error('Indique le texte du filigrane.');
 
     const doc = await loadPdf(filePath);
-    const font = await doc.embedFont(StandardFonts.HelveticaBold);
     const pageCount = doc.getPageCount();
     const targetIndices = pagesSpec && pagesSpec.trim()
         ? parsePageRanges(pagesSpec, pageCount).flat()
         : doc.getPageIndices();
-    const [r, g, b] = hexToRgb01(color);
+    const rotation = rotationDeg || 0;
+    const finalOpacity = typeof opacity === 'number' ? opacity : 0.35;
+    const margin = 28;
+
+    let font = null; let embeddedImage = null; let imgAspect = 1;
+    if (isImage) {
+        embeddedImage = await embedImageAuto(doc, imagePath);
+        imgAspect = embeddedImage.height / embeddedImage.width;
+    } else {
+        font = await doc.embedFont(StandardFonts.HelveticaBold);
+    }
+    const [r, g, b] = isImage ? [0, 0, 0] : hexToRgb01(color);
     const size = fontSize || 40;
 
     targetIndices.forEach((idx) => {
         const page = doc.getPage(idx);
         const { width, height } = page.getSize();
+
+        if (isImage) {
+            const w = width * ((imageWidthPct || 30) / 100);
+            const h = w * imgAspect;
+            const { cx, cy } = watermarkTargetCenter(position, width, height, w / 2, h / 2, margin);
+            const anchor = rotatedAnchor(cx, cy, w / 2, h / 2, rotation);
+            page.drawImage(embeddedImage, {
+                x: anchor.x, y: anchor.y, width: w, height: h, opacity: finalOpacity, rotate: degrees(rotation),
+            });
+        } else {
         const textWidth = font.widthOfTextAtSize(text, size);
-        let x; let y;
-        switch (position) {
-            case 'top-left': x = 24; y = height - size - 16; break;
-            case 'top-right': x = width - textWidth - 24; y = height - size - 16; break;
-            case 'bottom-left': x = 24; y = 24; break;
-            case 'bottom-right': x = width - textWidth - 24; y = 24; break;
-            default: x = (width - textWidth) / 2; y = height / 2;
-        }
+            const halfWidth = textWidth / 2;
+            const halfHeight = size * 0.33; // approximation du centre visuel au-dessus de la ligne de base
+            const { cx, cy } = watermarkTargetCenter(position, width, height, halfWidth, halfHeight, margin);
+            const anchor = rotatedAnchor(cx, cy, halfWidth, halfHeight, rotation);
         page.drawText(text, {
-            x, y, size, font, color: rgb(r, g, b),
-            opacity: typeof opacity === 'number' ? opacity : 0.35,
-            rotate: degrees(rotationDeg || 0),
+                x: anchor.x, y: anchor.y, size, font, color: rgb(r, g, b), opacity: finalOpacity, rotate: degrees(rotation),
         });
+        }
     });
 
     fs.writeFileSync(outputPath, await doc.save());
@@ -630,7 +667,7 @@ async function pdfUnlock({ filePath, currentPassword, outputPath }) {
 
 // ---- Extraction de texte (pour Traduire) ----
 async function pdfExtractText({ filePath, password }) {
-    const pdfjs = getPdfjsExtract();
+    const pdfjs = await getPdfjsExtract();
     if (!pdfjs) {
         throw new Error(
             "Le module 'pdfjs-dist' est introuvable. Lance `npm install` à la racine du projet "
@@ -763,6 +800,104 @@ async function pdfTranslate({
     return { pageCount: outDoc.getPageCount(), failures };
 }
 
+// ---- Polices système (fonction Créer) ----
+let systemFontsCache = null;
+
+function systemFontDirs() {
+    const dirs = [];
+    if (process.platform === 'win32') {
+        dirs.push(path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts'));
+        if (process.env.LOCALAPPDATA) dirs.push(path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Windows', 'Fonts'));
+    } else if (process.platform === 'darwin') {
+        dirs.push('/System/Library/Fonts', '/Library/Fonts');
+        if (process.env.HOME) dirs.push(path.join(process.env.HOME, 'Library', 'Fonts'));
+    } else {
+        dirs.push('/usr/share/fonts', '/usr/local/share/fonts');
+        if (process.env.HOME) dirs.push(path.join(process.env.HOME, '.fonts'), path.join(process.env.HOME, '.local', 'share', 'fonts'));
+    }
+    return dirs.filter((d) => fs.existsSync(d));
+}
+
+function walkFontFiles(dir, out, depth = 0) {
+    if (depth > 4 || out.length > 400) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walkFontFiles(full, out, depth + 1);
+        else if (/\.(ttf|otf|ttc)$/i.test(entry.name)) out.push(full);
+        if (out.length > 400) return;
+    }
+}
+
+async function listSystemFonts() {
+    if (systemFontsCache) return systemFontsCache;
+    let fontkit;
+    try { fontkit = require('fontkit'); } catch { systemFontsCache = []; return systemFontsCache; }
+
+    const files = [];
+    systemFontDirs().forEach((dir) => walkFontFiles(dir, files));
+
+    const seen = new Set();
+    const results = [];
+    for (const file of files) {
+        try {
+            const font = await fontkit.open(file);
+            const faces = font.fonts || [font]; // gère les collections .ttc
+            for (const face of faces.slice(0, 1)) {
+                const family = face.familyName || path.basename(file, path.extname(file));
+                const style = face.subfamilyName || 'Regular';
+                const label = style && !/regular|normal/i.test(style) ? `${family} ${style}` : family;
+                if (seen.has(label)) continue;
+                seen.add(label);
+                results.push({ label, filePath: file });
+            }
+        } catch { /* fichier de police illisible : on l'ignore */ }
+        if (results.length > 250) break;
+    }
+    results.sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+    systemFontsCache = results;
+    return results;
+}
+
+const STANDARD_FONTS_LIST = [
+    { label: 'Helvetica (standard)', standardKey: 'Helvetica' },
+    { label: 'Helvetica Gras (standard)', standardKey: 'HelveticaBold' },
+    { label: 'Times New Roman (standard)', standardKey: 'TimesRoman' },
+    { label: 'Times New Roman Gras (standard)', standardKey: 'TimesRomanBold' },
+    { label: 'Times New Roman Italique (standard)', standardKey: 'TimesRomanItalic' },
+    { label: 'Courier (standard)', standardKey: 'Courier' },
+    { label: 'Courier Gras (standard)', standardKey: 'CourierBold' },
+];
+
+async function embedCreateFont(doc, fontSpec, cache) {
+    const spec = fontSpec || { kind: 'standard', key: 'Helvetica' };
+    const cacheKey = `${spec.kind}::${spec.key}`;
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+    const { StandardFonts } = ensurePdfLib();
+    let embedded;
+    if (spec.kind === 'system') {
+        let fontkit;
+        try { fontkit = require('fontkit'); } catch { fontkit = null; }
+        if (fontkit && fs.existsSync(spec.key)) {
+            try {
+                doc.registerFontkit(fontkit);
+                embedded = await doc.embedFont(fs.readFileSync(spec.key));
+            } catch {
+                embedded = await doc.embedFont(StandardFonts.Helvetica);
+            }
+        } else {
+            embedded = await doc.embedFont(StandardFonts.Helvetica);
+        }
+    } else {
+        const key = StandardFonts[spec.key] ? spec.key : 'Helvetica';
+        embedded = await doc.embedFont(StandardFonts[key]);
+    }
+    cache.set(cacheKey, embedded);
+    return embedded;
+}
+
 // ---- Créateur de PDF (depuis zéro) ----
 function pdfPositionToPoints(block, pageHeightPt) {
     // Convertit une position "haut-gauche, y vers le bas" (comme le HTML)
@@ -798,10 +933,9 @@ function wrapTextLines(text, font, size, maxWidth) {
 }
 
 async function pdfCreate({ pages, outputPath }) {
-    const { PDFDocument, StandardFonts, rgb } = ensurePdfLib();
+    const { PDFDocument, rgb } = ensurePdfLib();
     const outDoc = await PDFDocument.create();
-    const fontRegular = await outDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontCache = new Map();
     const imageCache = new Map();
 
     for (const pageDef of pages) {
@@ -815,8 +949,10 @@ async function pdfCreate({ pages, outputPath }) {
 
         for (const block of (pageDef.blocks || [])) {
             if (block.type === 'text') {
-                const font = block.bold ? fontBold : fontRegular;
                 const size = block.fontSize || 14;
+                let fontSpec = block.font;
+                if (!fontSpec) fontSpec = { kind: 'standard', key: block.bold ? 'HelveticaBold' : 'Helvetica' };
+                const font = await embedCreateFont(outDoc, fontSpec, fontCache);
                 const [r, g, b] = hexToRgb01(block.color || '#111111');
                 const lineHeight = size * 1.28;
                 const lines = wrapTextLines(block.text || '', font, size, block.w);
@@ -842,6 +978,24 @@ async function pdfCreate({ pages, outputPath }) {
                 const [r, g, b] = hexToRgb01(block.color || '#111111');
                 page.drawRectangle({
                     x: block.x, y: pdfPositionToPoints(block, height), width: block.w, height: block.h, color: rgb(r, g, b),
+                });
+            } else if (block.type === 'ellipse') {
+                const [r, g, b] = hexToRgb01(block.color || '#111111');
+                page.drawEllipse({
+                    x: block.x + block.w / 2,
+                    y: pdfPositionToPoints(block, height) + block.h / 2,
+                    xScale: block.w / 2,
+                    yScale: block.h / 2,
+                    color: rgb(r, g, b),
+                });
+            } else if (block.type === 'triangle') {
+                const [r, g, b] = hexToRgb01(block.color || '#111111');
+                const w = block.w; const h = block.h;
+                const svgPath = `M ${w / 2} 0 L ${w} ${h} L 0 ${h} Z`;
+                page.drawSvgPath(svgPath, {
+                    x: block.x,
+                    y: pdfPositionToPoints(block, height) + h,
+                    color: rgb(r, g, b),
                 });
             }
         }
@@ -916,10 +1070,9 @@ ipcMain.handle('shell:open-path', (_e, filePath) => shell.openPath(filePath));
 // ------------------------------------------------------------
 // IPC — Outils / sélecteurs
 // ------------------------------------------------------------
-ipcMain.handle('pdf:check-tools', (event, { forceRefresh = false } = {}) => {
+ipcMain.handle('pdf:check-tools', async (event, { forceRefresh = false } = {}) => {
     if (forceRefresh) {
         cachedSofficePath = undefined;
-        cachedGsPath = undefined;
         cachedWordAvailable = undefined;
         cachedExcelAvailable = undefined;
         cachedPowerPointAvailable = undefined;
@@ -927,8 +1080,7 @@ ipcMain.handle('pdf:check-tools', (event, { forceRefresh = false } = {}) => {
     return {
         pdfLib: !!pdfLib,
         sharp: !!sharpLib,
-        pdfjs: !!getPdfjsExtract(),
-        ghostscript: !!locateGhostscript(),
+        pdfjs: !!(await getPdfjsExtract()),
         libreoffice: !!locateSoffice(),
         word: isWordAvailable(),
         excel: isExcelAvailable(),
@@ -1044,6 +1196,9 @@ ipcMain.handle('pdf:translate', async (event, payload) => {
 // ------------------------------------------------------------
 ipcMain.handle('pdf:create', async (event, payload) => {
     try { return { ok: true, ...(await pdfCreate(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('pdf:list-fonts', async () => {
+    try { return { ok: true, standard: STANDARD_FONTS_LIST, system: await listSystemFonts() }; } catch (err) { return { ok: false, error: err.message, standard: STANDARD_FONTS_LIST, system: [] }; }
 });
 
 // ------------------------------------------------------------
