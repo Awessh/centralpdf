@@ -145,6 +145,57 @@ function initTheme() {
 initTheme();
 
 // ============================================================
+// Barre latérale réductible (icônes seules)
+// ============================================================
+const SIDEBAR_STORAGE_KEY = 'cpm-sidebar-collapsed';
+function initSidebarToggle() {
+    const sidebar = document.getElementById('sidebar');
+    const btn = document.getElementById('sidebar-toggle-btn');
+    if (localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1') sidebar.classList.add('collapsed');
+    btn.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebar.classList.contains('collapsed') ? '1' : '0');
+    });
+}
+initSidebarToggle();
+
+// ============================================================
+// Barre de progression globale (opérations en cours)
+// ============================================================
+let progressHideTimer = null;
+function showGlobalProgress(percent, label) {
+    clearTimeout(progressHideTimer);
+    const bar = document.getElementById('global-progress-bar');
+    const fill = document.getElementById('global-progress-fill');
+    const chip = document.getElementById('global-progress-chip');
+    const chipLabel = document.getElementById('global-progress-label');
+    bar.classList.remove('hidden');
+    chip.classList.remove('hidden');
+    if (percent == null) {
+        fill.classList.add('indeterminate');
+        fill.style.width = '';
+        chipLabel.textContent = label ? `${label}…` : 'Opération en cours…';
+    } else {
+        fill.classList.remove('indeterminate');
+        fill.style.width = `${Math.max(2, Math.min(100, percent))}%`;
+        chipLabel.textContent = `${label ? `${label}… ` : ''}${Math.round(percent)}%`;
+    }
+}
+function hideGlobalProgress() {
+    const bar = document.getElementById('global-progress-bar');
+    const chip = document.getElementById('global-progress-chip');
+    const fill = document.getElementById('global-progress-fill');
+    fill.classList.remove('indeterminate');
+    fill.style.width = '100%';
+    progressHideTimer = setTimeout(() => {
+        bar.classList.add('hidden');
+        chip.classList.add('hidden');
+        fill.style.width = '0%';
+    }, 350);
+}
+api.onProgress(({ percent, label }) => { showGlobalProgress(percent, label); });
+
+// ============================================================
 // Aperçu PDF en-app, avec impression (utilisé par tous les modules)
 // ============================================================
 const previewModal = { zoom: 1, filePath: null };
@@ -568,7 +619,8 @@ document.getElementById('organize-save-btn').addEventListener('click', async () 
 
     setStatus('organize-status', 'info', 'Traitement en cours…');
     const pagesPayload = organizeState.pages.map((p) => ({ index: p.originalIndex, rotate: p.rotate, deleted: p.deleted }));
-    const res = await api.pdfOrganize({ filePath: organizeState.filePath, pages: pagesPayload, outputPath, password: organizeState.password });
+    showGlobalProgress(null, 'Organisation du PDF');
+    const res = await api.pdfOrganize({ filePath: organizeState.filePath, pages: pagesPayload, outputPath, password: organizeState.password }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('organize-status'); showToast('error', res.error, 9000); return; }
     clearStatus('organize-status');
     showToast('success', `PDF enregistré (${res.pageCount} page(s)).${resultActionsHtml(outputPath)}`, 9000);
@@ -630,7 +682,8 @@ document.getElementById('merge-run-btn').addEventListener('click', async () => {
     const outputPath = await api.pdfChooseSavePath({ defaultName: 'fusion.pdf', extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('merge-status', 'info', 'Fusion en cours…');
-    const res = await api.pdfMerge({ filePaths: mergeState.files.map((f) => f.path), outputPath });
+    showGlobalProgress(null, 'Fusion des PDF');
+    const res = await api.pdfMerge({ filePaths: mergeState.files.map((f) => f.path), outputPath }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('merge-status'); showToast('error', res.error, 9000); return; }
     clearStatus('merge-status');
     showToast('success', `${mergeState.files.length} fichiers fusionnés en un PDF de ${res.pageCount} page(s).${resultActionsHtml(outputPath)}`, 9000);
@@ -667,7 +720,8 @@ document.getElementById('compress-run-btn').addEventListener('click', async () =
     const outputPath = await api.pdfChooseSavePath({ defaultName: `${stripExt(compressState.fileName)}_compresse.pdf`, extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('compress-status', 'info', 'Compression en cours…');
-    const res = await api.pdfCompress({ filePath: compressState.filePath, level, outputPath });
+    showGlobalProgress(null, 'Compression du PDF');
+    const res = await api.pdfCompress({ filePath: compressState.filePath, level, outputPath }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('compress-status'); showToast('error', res.error, 9000); return; }
     clearStatus('compress-status');
     const ratio = res.before > 0 ? Math.round((1 - res.after / res.before) * 100) : 0;
@@ -715,7 +769,8 @@ document.getElementById('split-run-btn').addEventListener('click', async () => {
     const outputDir = await api.pdfChooseFolder();
     if (!outputDir) return;
     setStatus('split-status', 'info', 'Scission en cours…');
-    const res = await api.pdfSplit({ filePath: splitState.filePath, mode, ranges, everyN, outputDir });
+    showGlobalProgress(null, 'Scission du PDF');
+    const res = await api.pdfSplit({ filePath: splitState.filePath, mode, ranges, everyN, outputDir }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('split-status'); showToast('error', res.error, 9000); return; }
     clearStatus('split-status');
     showToast('success', `${res.files.length} fichier(s) créé(s) dans le dossier choisi.`, 9000);
@@ -789,6 +844,7 @@ document.getElementById('wm-run-btn').addEventListener('click', async () => {
     const outputPath = await api.pdfChooseSavePath({ defaultName: `${stripExt(editState.fileName)}_filigrane.pdf`, extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('edit-status', 'info', 'Application du filigrane…');
+    showGlobalProgress(null, 'Application du filigrane');
     const res = await api.pdfAddWatermark({
         filePath: editState.filePath,
         type: wmState.type,
@@ -811,12 +867,13 @@ document.getElementById('blank-run-btn').addEventListener('click', async () => {
     const outputPath = await api.pdfChooseSavePath({ defaultName: `${stripExt(editState.fileName)}_pages.pdf`, extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('edit-status', 'info', 'Insertion des pages…');
+    showGlobalProgress(null, 'Insertion des pages');
     const res = await api.pdfInsertBlankPages({
         filePath: editState.filePath,
         afterPage: parseInt(document.getElementById('blank-after').value, 10) || 0,
         count: parseInt(document.getElementById('blank-count').value, 10) || 1,
         outputPath,
-    });
+    }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('edit-status'); showToast('error', res.error, 9000); return; }
     clearStatus('edit-status');
     showToast('success', `Pages insérées. Le document compte maintenant ${res.pageCount} page(s).${resultActionsHtml(outputPath)}`, 9000);
@@ -880,6 +937,7 @@ document.getElementById('protect-add-run-btn').addEventListener('click', async (
     const outputPath = await api.pdfChooseSavePath({ defaultName: `${stripExt(protectAddState.fileName)}_protege.pdf`, extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('protect-add-status', 'info', 'Chiffrement en cours…');
+    showGlobalProgress(null, 'Protection du PDF');
     const res = await api.pdfProtect({
         filePath: protectAddState.filePath,
         userPassword,
@@ -887,7 +945,7 @@ document.getElementById('protect-add-run-btn').addEventListener('click', async (
         permissions,
         currentPassword: protectAddState.currentPassword,
         outputPath,
-    });
+    }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('protect-add-status'); showToast('error', res.error, 9000); return; }
     clearStatus('protect-add-status');
     showToast('success', `PDF protégé avec succès.${resultActionsHtml(outputPath)}`, 9000);
@@ -920,7 +978,8 @@ document.getElementById('protect-remove-run-btn').addEventListener('click', asyn
     const outputPath = await api.pdfChooseSavePath({ defaultName: `${stripExt(protectRemoveState.fileName)}_sans_protection.pdf`, extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('protect-remove-status', 'info', 'Retrait de la protection…');
-    const res = await api.pdfUnlock({ filePath: protectRemoveState.filePath, currentPassword, outputPath });
+    showGlobalProgress(null, 'Retrait de la protection');
+    const res = await api.pdfUnlock({ filePath: protectRemoveState.filePath, currentPassword, outputPath }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('protect-remove-status'); showToast('error', res.error, 9000); return; }
     clearStatus('protect-remove-status');
     showToast('success', `Protection retirée.${resultActionsHtml(outputPath)}`, 9000);
@@ -961,9 +1020,10 @@ document.getElementById('translate-run-btn').addEventListener('click', async () 
     const outputPath = await api.pdfChooseSavePath({ defaultName: `${stripExt(translateState.fileName)}_${targetLang}.pdf`, extensions: ['pdf'] });
     if (!outputPath) return;
     setStatus('translate-status', 'info', 'Extraction et traduction du texte en cours… cela peut prendre un moment selon la taille du document.');
+    showGlobalProgress(null, 'Traduction du document');
     const res = await api.pdfTranslate({
         filePath: translateState.filePath, password: translateState.password, sourceLang, targetLang, outputPath,
-    });
+    }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('translate-status'); showToast('error', res.error, 9000); return; }
     clearStatus('translate-status');
     const failNote = res.failures > 0 ? ` (${res.failures} segment(s) non traduits, quota du service gratuit probablement atteint)` : '';
@@ -1252,7 +1312,7 @@ function renderInspector() {
     const selectedBlocks = getSelectedBlocks();
 
     if (!selectedBlocks.length) {
-        box.innerHTML = '<p class="inspector-empty"><i class="fa-solid fa-arrow-pointer"></i> Sélectionne un élément — ou fais un cliquer-glisser sur la zone vide pour en sélectionner plusieurs — pour modifier ses propriétés.</p>';
+        box.innerHTML = '<p class="inspector-empty"><i class="fa-solid fa-arrow-pointer"></i> Sélectionne un élément — ou fais un cliquer-glisser sur la zone vide pour en sélectionner plusieurs — pour modifier ses propriétés. <br/> Raccourcis : <br/> <kbd>Ctrl</kbd>+<kbd>C</kbd>: copier <br/>· <kbd>Ctrl</kbd>+<kbd>V</kbd> : coller <br/>· <kbd>Ctrl</kbd>+<kbd>D</kbd> : dupliquer <br/>· <kbd>Ctrl</kbd>+<kbd>A</kbd> : tout sélectionner <br/>· <kbd>Suppr</kbd> : supprimer <br/>· flèches déplacer (<kbd>Maj</kbd>+flèche = 10px) <br/>· <kbd>Échap</kbd> : désélectionner <br/>· <kbd>Ctrl</kbd>+molette : zoomer <br/>· cliquer-glisser : sélection multiple</p>';
         return;
     }
 
@@ -1713,7 +1773,8 @@ document.getElementById('create-save-btn').addEventListener('click', async () =>
     if (!outputPath) return;
     showToast('info', 'Génération du PDF en cours…', 3000);
     const payloadPages = await buildCreatorPayloadPages();
-    const res = await api.pdfCreate({ pages: payloadPages, outputPath });
+    showGlobalProgress(null, 'Création du PDF');
+    const res = await api.pdfCreate({ pages: payloadPages, outputPath }).finally(() => hideGlobalProgress());
     if (!res.ok) { showToast('error', res.error, 9000); return; }
     showToast('success', `PDF créé (${res.pageCount} page(s)).${resultActionsHtml(outputPath)}`, 9000);
 });
@@ -1721,7 +1782,8 @@ document.getElementById('create-save-btn').addEventListener('click', async () =>
 async function generateCreatorPreviewFile() {
     const tempPath = await api.getTempPath('pdf');
     const payloadPages = await buildCreatorPayloadPages();
-    const res = await api.pdfCreate({ pages: payloadPages, outputPath: tempPath });
+    showGlobalProgress(null, "Génération de l'aperçu");
+    const res = await api.pdfCreate({ pages: payloadPages, outputPath: tempPath }).finally(() => hideGlobalProgress());
     if (!res.ok) { showToast('error', res.error, 9000); return null; }
     return tempPath;
 }
@@ -1775,7 +1837,8 @@ document.getElementById('convert-run-btn').addEventListener('click', async () =>
     const outputPath = await api.pdfChooseSavePath({ defaultName, extensions: [convertState.target] });
     if (!outputPath) return;
     setStatus('convert-status', 'info', 'Conversion en cours… cela peut prendre quelques instants.');
-    const res = await api.pdfConvert({ filePath: convertState.filePath, targetFormat: convertState.target, outputPath });
+    showGlobalProgress(null, 'Conversion en cours');
+    const res = await api.pdfConvert({ filePath: convertState.filePath, targetFormat: convertState.target, outputPath }).finally(() => hideGlobalProgress());
     if (!res.ok) { clearStatus('convert-status'); showToast('error', res.error, 9000); return; }
     clearStatus('convert-status');
     const engineLabel = { word: 'Microsoft Word', excel: 'Microsoft Excel', powerpoint: 'Microsoft PowerPoint', libreoffice: 'LibreOffice', electron: 'moteur intégré' }[res.engine] || '';

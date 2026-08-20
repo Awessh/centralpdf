@@ -52,4 +52,5 @@ contextBridge.exposeInMainWorld('api', {
     downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
     installUpdate: () => ipcRenderer.invoke('app:install-update'),
     onUpdateStatus: (cb) => ipcRenderer.on('update:status', (_e, d) => cb(d)),
+    onProgress: (cb) => ipcRenderer.on('op:progress', (_e, d) => cb(d)),
 });

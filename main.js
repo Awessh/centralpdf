@@ -74,6 +74,7 @@ function createMainWindow() {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: false,
+            devTools: false
         },
     });
     mainWindow.loadFile('index.html');
@@ -365,7 +366,9 @@ async function loadPdf(filePath, password) {
 }
 
 // ---- Organiser : réordonner / tourner / supprimer les pages ----
-async function pdfOrganize({ filePath, pages, outputPath, password }) {
+async function pdfOrganize({
+    filePath, pages, outputPath, password, onProgress,
+}) {
     const { PDFDocument, degrees } = ensurePdfLib();
     const srcDoc = await loadPdf(filePath, password);
     const outDoc = await PDFDocument.create();
@@ -373,6 +376,7 @@ async function pdfOrganize({ filePath, pages, outputPath, password }) {
     const kept = (pages || []).filter((p) => !p.deleted);
     if (!kept.length) throw new Error('Impossible de produire un PDF sans aucune page.');
 
+    if (onProgress) onProgress(10, 'Copie des pages');
     const copiedPages = await outDoc.copyPages(srcDoc, kept.map((p) => p.index));
     copiedPages.forEach((page, i) => {
         const rotateBy = kept[i].rotate || 0;
@@ -381,28 +385,37 @@ async function pdfOrganize({ filePath, pages, outputPath, password }) {
             page.setRotation(degrees(((current + rotateBy) % 360 + 360) % 360));
         }
         outDoc.addPage(page);
+        if (onProgress) onProgress(10 + Math.round(((i + 1) / copiedPages.length) * 75), 'Copie des pages');
     });
 
+    if (onProgress) onProgress(95, 'Enregistrement');
     fs.writeFileSync(outputPath, await outDoc.save());
     return { pageCount: outDoc.getPageCount() };
 }
 
 // ---- Fusionner plusieurs PDF (dans l'ordre fourni) ----
-async function pdfMerge({ filePaths, outputPath }) {
+async function pdfMerge({ filePaths, outputPath, onProgress }) {
     const { PDFDocument } = ensurePdfLib();
     if (!filePaths || filePaths.length < 2) throw new Error('Sélectionne au moins deux fichiers PDF à fusionner.');
     const outDoc = await PDFDocument.create();
-    for (const fp of filePaths) {
+    for (let i = 0; i < filePaths.length; i += 1) {
+        const fp = filePaths[i];
+        // eslint-disable-next-line no-await-in-loop
         const doc = await loadPdf(fp);
+        // eslint-disable-next-line no-await-in-loop
         const copied = await outDoc.copyPages(doc, doc.getPageIndices());
         copied.forEach((p) => outDoc.addPage(p));
+        if (onProgress) onProgress(Math.round(((i + 1) / filePaths.length) * 90), `Fusion (${i + 1}/${filePaths.length})`);
     }
+    if (onProgress) onProgress(95, 'Enregistrement');
     fs.writeFileSync(outputPath, await outDoc.save());
     return { pageCount: outDoc.getPageCount() };
 }
 
 // ---- Scinder un PDF ----
-async function pdfSplit({ filePath, mode, ranges, everyN, outputDir }) {
+async function pdfSplit({
+    filePath, mode, ranges, everyN, outputDir, onProgress,
+}) {
     const { PDFDocument } = ensurePdfLib();
     const srcDoc = await loadPdf(filePath);
     const pageCount = srcDoc.getPageCount();
@@ -426,12 +439,16 @@ async function pdfSplit({ filePath, mode, ranges, everyN, outputDir }) {
 
     const outFiles = [];
     for (let gi = 0; gi < groups.length; gi += 1) {
+        // eslint-disable-next-line no-await-in-loop
         const outDoc = await PDFDocument.create();
+        // eslint-disable-next-line no-await-in-loop
         const copied = await outDoc.copyPages(srcDoc, groups[gi]);
         copied.forEach((p) => outDoc.addPage(p));
         const outPath = path.join(outputDir, `${base}_partie${gi + 1}.pdf`);
+        // eslint-disable-next-line no-await-in-loop
         fs.writeFileSync(outPath, await outDoc.save());
         outFiles.push(outPath);
+        if (onProgress) onProgress(Math.round(((gi + 1) / groups.length) * 100), `Fichier ${gi + 1}/${groups.length}`);
     }
     return { files: outFiles };
 }
@@ -445,7 +462,9 @@ function colorSpaceChannels(dict, PDFName) {
     return null; // CMYK, Indexed, ICCBased... non gérés nativement : on laisse l'image telle quelle
 }
 
-async function pdfCompressNative({ filePath, level, outputPath }) {
+async function pdfCompressNative({
+    filePath, level, outputPath, onProgress,
+}) {
     if (!sharpLib) return null;
     const { PDFName, PDFRawStream } = ensurePdfLib();
     const doc = await loadPdf(filePath);
@@ -455,8 +474,11 @@ async function pdfCompressNative({ filePath, level, outputPath }) {
     const quality = qualityMap[level] || 65;
     const maxDim = maxDimMap[level] || 1500;
 
+    const allObjects = Array.from(doc.context.enumerateIndirectObjects());
     let touched = 0;
-    for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    for (let oi = 0; oi < allObjects.length; oi += 1) {
+        const [, obj] = allObjects[oi];
+        if (onProgress && oi % 5 === 0) onProgress(Math.round((oi / allObjects.length) * 85), 'Compression des images');
         if (!(obj instanceof PDFRawStream)) continue;
         const dict = obj.dict;
         const subtype = dict.get(PDFName.of('Subtype'));
@@ -514,19 +536,25 @@ async function pdfCompressNative({ filePath, level, outputPath }) {
 
     if (touched === 0) return null;
     const before = fs.statSync(filePath).size;
+    if (onProgress) onProgress(95, 'Enregistrement');
     fs.writeFileSync(outputPath, await doc.save({ useObjectStreams: true }));
     const after = fs.statSync(outputPath).size;
     return { engine: 'sharp', before, after };
 }
 
-async function pdfCompress({ filePath, level, outputPath }) {
+async function pdfCompress({
+    filePath, level, outputPath, onProgress,
+}) {
     const before = fs.statSync(filePath).size;
-    const native = await pdfCompressNative({ filePath, level, outputPath });
+    const native = await pdfCompressNative({
+        filePath, level, outputPath, onProgress,
+    });
     if (native) return native;
 
     // Aucune image compressible trouvée (ou 'sharp' indisponible) : on se
     // rabat uniquement sur l'optimisation de la structure du PDF, en JS pur
     // (plus aucune dépendance à un outil externe comme Ghostscript).
+    if (onProgress) onProgress(60, 'Optimisation de la structure');
     const doc = await loadPdf(filePath);
     fs.writeFileSync(outputPath, await doc.save({ useObjectStreams: true }));
     const after = fs.statSync(outputPath).size;
@@ -799,9 +827,10 @@ async function runWithConcurrency(items, limit, worker) {
 // traduction au même emplacement, à une taille de police proche de
 // l'originale (réduite automatiquement si besoin pour tenir dans l'espace).
 async function pdfTranslate({
-    filePath, password, sourceLang, targetLang, email, outputPath,
+    filePath, password, sourceLang, targetLang, email, outputPath, onProgress,
 }) {
     const { PDFDocument, StandardFonts, rgb } = ensurePdfLib();
+    if (onProgress) onProgress(2, 'Extraction du texte');
     const { pages: sourcePages } = await pdfExtractLines({ filePath, password });
     const totalLines = sourcePages.reduce((sum, p) => sum + p.lines.length, 0);
     if (!totalLines) {
@@ -882,8 +911,10 @@ async function pdfTranslate({
                 });
             }
         });
+        if (onProgress) onProgress(5 + Math.round(((pi + 1) / sourcePages.length) * 90), `Traduction (page ${pi + 1}/${sourcePages.length})`);
     }
 
+    if (onProgress) onProgress(97, 'Enregistrement');
     fs.writeFileSync(outputPath, await outDoc.save());
     return { pageCount: outDoc.getPageCount(), failures };
 }
@@ -1045,13 +1076,14 @@ function wrapTextLines(text, font, size, maxWidth) {
     return lines;
 }
 
-async function pdfCreate({ pages, outputPath }) {
+async function pdfCreate({ pages, outputPath, onProgress }) {
     const { PDFDocument, rgb } = ensurePdfLib();
     const outDoc = await PDFDocument.create();
     const fontCache = new Map();
     const imageCache = new Map();
 
-    for (const pageDef of pages) {
+    for (let pageIdx = 0; pageIdx < pages.length; pageIdx += 1) {
+        const pageDef = pages[pageIdx];
         const { width, height } = pageDef;
         const page = outDoc.addPage([width, height]);
 
@@ -1112,8 +1144,10 @@ async function pdfCreate({ pages, outputPath }) {
                 page.drawSvgPath(svgPath, opts);
             }
         }
+        if (onProgress) onProgress(Math.round(((pageIdx + 1) / pages.length) * 90), `Page ${pageIdx + 1}/${pages.length}`);
     }
 
+    if (onProgress) onProgress(95, 'Enregistrement');
     fs.writeFileSync(outputPath, await outDoc.save());
     return { pageCount: outDoc.getPageCount() };
 }
@@ -1316,17 +1350,24 @@ ipcMain.handle('pdf:read-file-base64', async (event, filePath) => {
 // ------------------------------------------------------------
 // IPC — Organiser / Fusionner / Compresser / Scinder
 // ------------------------------------------------------------
+function makeProgressReporter(event) {
+    return (percent, label) => {
+        if (event.sender.isDestroyed()) return;
+        event.sender.send('op:progress', { percent, label });
+    };
+}
+
 ipcMain.handle('pdf:organize', async (event, payload) => {
-    try { return { ok: true, ...(await pdfOrganize(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { return { ok: true, ...(await pdfOrganize({ ...payload, onProgress: makeProgressReporter(event) })) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('pdf:merge', async (event, payload) => {
-    try { return { ok: true, ...(await pdfMerge(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { return { ok: true, ...(await pdfMerge({ ...payload, onProgress: makeProgressReporter(event) })) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('pdf:split', async (event, payload) => {
-    try { return { ok: true, ...(await pdfSplit(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { return { ok: true, ...(await pdfSplit({ ...payload, onProgress: makeProgressReporter(event) })) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('pdf:compress', async (event, payload) => {
-    try { return { ok: true, ...(await pdfCompress(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { return { ok: true, ...(await pdfCompress({ ...payload, onProgress: makeProgressReporter(event) })) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 
 // ------------------------------------------------------------
@@ -1356,14 +1397,14 @@ ipcMain.handle('pdf:extract-text', async (event, payload) => {
     try { return { ok: true, ...(await pdfExtractText(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('pdf:translate', async (event, payload) => {
-    try { return { ok: true, ...(await pdfTranslate(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { return { ok: true, ...(await pdfTranslate({ ...payload, onProgress: makeProgressReporter(event) })) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 
 // ------------------------------------------------------------
 // IPC — Créateur PDF
 // ------------------------------------------------------------
 ipcMain.handle('pdf:create', async (event, payload) => {
-    try { return { ok: true, ...(await pdfCreate(payload)) }; } catch (err) { return { ok: false, error: err.message }; }
+    try { return { ok: true, ...(await pdfCreate({ ...payload, onProgress: makeProgressReporter(event) })) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('pdf:list-fonts', async () => {
     try { return { ok: true, standard: STANDARD_FONTS_LIST, system: await listSystemFonts() }; } catch (err) { return { ok: false, error: err.message, standard: STANDARD_FONTS_LIST, system: [] }; }
