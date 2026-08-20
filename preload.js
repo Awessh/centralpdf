@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('api', {
     openPath: (p) => ipcRenderer.invoke('shell:open-path', p),
     showInFolder: (p) => ipcRenderer.invoke('shell:show-in-folder', p),
     pdfOpenInApp: (p) => ipcRenderer.invoke('shell:open-path', p),
+    printFile: (p) => ipcRenderer.invoke('app:print-file', p),
+    saveTempImage: (dataUrl) => ipcRenderer.invoke('app:save-temp-image', { dataUrl }),
+    getTempPath: (ext) => ipcRenderer.invoke('app:get-temp-path', ext),
 
     // ---------- Détection des outils externes ----------
     pdfCheckTools: (opts) => ipcRenderer.invoke('pdf:check-tools', opts),
@@ -46,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
     getAppVersion: () => ipcRenderer.invoke('app:get-version'),
     getUpdateStatus: () => ipcRenderer.invoke('app:get-update-status'),
     checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
+    downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
     installUpdate: () => ipcRenderer.invoke('app:install-update'),
     onUpdateStatus: (cb) => ipcRenderer.on('update:status', (_e, d) => cb(d)),
 });

@@ -59,26 +59,24 @@ function initUpdater({ app, ipcMain, dialog, BrowserWindow }) {
       return;
     }
 
-    autoUpdater.autoDownload = true;
+    // Le téléchargement ne démarre plus automatiquement : dès qu'une mise à
+    // jour est détectée, on prévient l'utilisateur via une carte "toast" côté
+    // interface (bouton "Mettre à jour" / "Le faire plus tard") et c'est ce
+    // clic qui déclenche downloadUpdate().
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
 
     autoUpdater.on('checking-for-update', () => setStatus('checking'));
-    autoUpdater.on('update-available', (info) => setStatus('downloading', { version: info?.version || null }));
+    autoUpdater.on('update-available', (info) => setStatus('available', {
+      version: info?.version || null,
+      info: { releaseDate: info?.releaseDate || null, releaseNotes: typeof info?.releaseNotes === 'string' ? info.releaseNotes : null },
+    }));
     autoUpdater.on('update-not-available', (info) => setStatus('not-available', { version: info?.version || app.getVersion() }));
     autoUpdater.on('download-progress', (progress) => {
       setStatus('downloading', { version: status.version, info: { percent: Math.round(progress?.percent || 0) } });
     });
     autoUpdater.on('update-downloaded', (info) => {
-      setStatus('downloaded', { version: info?.version || null });
-      dialog.showMessageBox({
-        type: 'info',
-        title: 'Mise à jour disponible',
-        message: `Central PDF Manager ${info.version} a été téléchargée.`,
-        detail: "Elle sera installée automatiquement à la prochaine fermeture, ou tu peux redémarrer maintenant.",
-        buttons: ['Redémarrer maintenant', 'Plus tard'],
-        defaultId: 0,
-        cancelId: 1,
-      }).then(({ response }) => { if (response === 0) autoUpdater.quitAndInstall(); });
+      setStatus('downloaded', { version: info?.version || status.version || null });
     });
     autoUpdater.on('error', (err) => setStatus('error', { info: { message: String(err?.message || err) } }));
 
@@ -88,6 +86,12 @@ function initUpdater({ app, ipcMain, dialog, BrowserWindow }) {
   ipcMain.handle('app:get-version', () => app.getVersion());
   ipcMain.handle('app:get-update-status', () => status);
   ipcMain.handle('app:check-for-updates', () => checkForUpdates());
+  ipcMain.handle('app:download-update', () => {
+    if (!autoUpdater || (status.state !== 'available' && status.state !== 'error')) return false;
+    setStatus('downloading', { version: status.version });
+    autoUpdater.downloadUpdate().catch((err) => setStatus('error', { info: { message: String(err?.message || err) } }));
+    return true;
+  });
   ipcMain.handle('app:install-update', () => {
     if (!autoUpdater || status.state !== 'downloaded') return false;
     autoUpdater.quitAndInstall();

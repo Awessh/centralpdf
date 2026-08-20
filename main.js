@@ -3,6 +3,8 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const zlib = require('zlib');
 const { initUpdater } = require('./src/updater');
@@ -701,6 +703,67 @@ async function translateChunk(text, source, target, email) {
     return data.responseData.translatedText;
 }
 
+// Extrait le texte d'un PDF ligne par ligne, avec la position et la taille
+// de police de chaque ligne (repère PDF : origine en bas à gauche, comme
+// pdf-lib), afin de pouvoir replacer le texte traduit exactement à
+// l'emplacement d'origine et ainsi conserver la mise en forme du document.
+async function pdfExtractLines({ filePath, password }) {
+    const pdfjs = await getPdfjsExtract();
+    if (!pdfjs) {
+        throw new Error(
+            "Le module 'pdfjs-dist' est introuvable. Lance `npm install` à la racine du projet "
+            + 'puis relance l\'application.',
+        );
+    }
+    const data = new Uint8Array(fs.readFileSync(filePath));
+    const loadingTask = pdfjs.getDocument({
+        data, password: password || undefined, isEvalSupported: false, useSystemFonts: true,
+    });
+    const doc = await loadingTask.promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i += 1) {
+        const page = await doc.getPage(i);
+        const viewport = page.getViewport({ scale: 1 });
+        const content = await page.getTextContent();
+
+        // Regroupe les items de texte par ligne (même hauteur de base, à
+        // une petite tolérance près), dans leur ordre d'apparition.
+        const rawLines = [];
+        content.items.forEach((it) => {
+            if (!it.str || !it.str.trim()) return;
+            const fontSize = Math.hypot(it.transform[2], it.transform[3])
+                || Math.hypot(it.transform[0], it.transform[1]) || 10;
+            const x = it.transform[4];
+            const y = it.transform[5];
+            const width = it.width || fontSize * it.str.length * 0.5;
+            let line = rawLines.find((l) => Math.abs(l.y - y) < Math.max(2, fontSize * 0.4));
+            if (!line) { line = { y, fontSize, items: [] }; rawLines.push(line); }
+            line.fontSize = Math.max(line.fontSize, fontSize);
+            line.items.push({ str: it.str, x, width });
+        });
+
+        const lines = rawLines.map((l) => {
+            l.items.sort((a, b) => a.x - b.x);
+            let text = '';
+            let lastEnd = null;
+            l.items.forEach((it) => {
+                if (lastEnd !== null && it.x - lastEnd > l.fontSize * 0.22) text += ' ';
+                text += it.str;
+                lastEnd = it.x + it.width;
+            });
+            const xMin = Math.min(...l.items.map((it) => it.x));
+            const xMax = Math.max(...l.items.map((it) => it.x + it.width));
+            return {
+                text: text.trim(), x: xMin, y: l.y, width: Math.max(4, xMax - xMin), fontSize: l.fontSize,
+            };
+        }).filter((l) => l.text);
+        lines.sort((a, b) => b.y - a.y);
+
+        pages.push({ width: viewport.width, height: viewport.height, lines });
+    }
+    return { pageCount: doc.numPages, pages };
+}
+
 function splitIntoChunks(text, maxLen) {
     const chunks = [];
     let remaining = text.trim();
@@ -729,71 +792,96 @@ async function runWithConcurrency(items, limit, worker) {
     return results;
 }
 
-// Traduit le texte extrait et reconstruit un nouveau PDF (texte reflowé,
-// sans conserver la mise en page d'origine — clairement indiqué dans l'UI).
+// Traduit le texte du PDF tout en conservant sa mise en forme d'origine :
+// on repart des pages du document source telles quelles (images, couleurs,
+// vecteurs, arrière-plans conservés), puis pour chaque ligne de texte on
+// masque le texte d'origine par un rectangle blanc et on redessine la
+// traduction au même emplacement, à une taille de police proche de
+// l'originale (réduite automatiquement si besoin pour tenir dans l'espace).
 async function pdfTranslate({
     filePath, password, sourceLang, targetLang, email, outputPath,
 }) {
     const { PDFDocument, StandardFonts, rgb } = ensurePdfLib();
-    const { pages: sourcePages } = await pdfExtractText({ filePath, password });
-    if (!sourcePages.some((t) => t.trim())) {
+    const { pages: sourcePages } = await pdfExtractLines({ filePath, password });
+    const totalLines = sourcePages.reduce((sum, p) => sum + p.lines.length, 0);
+    if (!totalLines) {
         throw new Error('Aucun texte détecté dans ce PDF (peut-être un PDF scanné/image).');
     }
 
+    const srcDoc = await loadPdf(filePath, password);
     const outDoc = await PDFDocument.create();
+    const copiedPages = await outDoc.copyPages(srcDoc, srcDoc.getPageIndices());
+    copiedPages.forEach((p) => outDoc.addPage(p));
+
     const font = await outDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
-    const pageWidth = 595.28; const pageHeight = 841.89; // A4
-    const margin = 50; const fontSize = 11; const lineHeight = 15;
     let failures = 0;
 
     for (let pi = 0; pi < sourcePages.length; pi += 1) {
-        const original = sourcePages[pi];
-        let translatedText = '';
-        if (original.trim()) {
-            const chunks = splitIntoChunks(original, 480);
-            const translatedChunks = await runWithConcurrency(chunks, 4, async (chunk) => {
-                try {
-                    return await translateChunk(chunk, sourceLang || 'auto', targetLang, email);
+        const { lines } = sourcePages[pi];
+        if (!lines.length) continue;
+        const page = outDoc.getPage(pi);
+
+        // Traduit toutes les lignes de la page en parallèle (limité), pour
+        // rester rapide même sur des documents avec beaucoup de texte.
+        // eslint-disable-next-line no-await-in-loop
+        const translations = await runWithConcurrency(lines, 4, async (line) => {
+            try {
+                if (line.text.length > 480) {
+                    const chunks = splitIntoChunks(line.text, 480);
+                    const translatedChunks = await Promise.all(
+                        chunks.map((c) => translateChunk(c, sourceLang || 'auto', targetLang, email)),
+                    );
+                    return translatedChunks.join(' ');
+                }
+                return await translateChunk(line.text, sourceLang || 'auto', targetLang, email);
                 } catch {
                     failures += 1;
-                    return chunk;
+                return line.text;
                 }
             });
-            translatedText = translatedChunks.join(' ');
-        }
 
-        let page = outDoc.addPage([pageWidth, pageHeight]);
-        page.drawText(`Page ${pi + 1}`, {
-            x: margin, y: pageHeight - margin + 10, size: 9, font: fontBold, color: rgb(0.6, 0.6, 0.6),
+        lines.forEach((line, idx) => {
+            const translated = translations[idx];
+            const padding = Math.max(2, line.fontSize * 0.25);
+
+            // Masque le texte d'origine avec un rectangle blanc légèrement
+            // plus grand que sa boîte englobante.
+            page.drawRectangle({
+                x: line.x - padding,
+                y: line.y - padding * 0.8,
+                width: line.width + padding * 2,
+                height: line.fontSize * 1.35,
+                color: rgb(1, 1, 1),
         });
 
-        const maxWidth = pageWidth - margin * 2;
-        const words = translatedText.split(/\s+/).filter(Boolean);
-        let line = '';
-        let y = pageHeight - margin;
-        const words2 = words.length ? words : ['(page sans texte)'];
-
-        const flushLine = () => {
-            if (y < margin) {
-                page = outDoc.addPage([pageWidth, pageHeight]);
-                y = pageHeight - margin;
+            // Réduit la taille de police si le texte traduit est plus long
+            // que l'espace disponible, pour rester sur une seule ligne tant
+            // que c'est raisonnablement lisible.
+            const maxWidth = line.width * 1.35;
+            let size = Math.min(line.fontSize, 32);
+            let textWidth = font.widthOfTextAtSize(translated, size);
+            const minSize = Math.max(5, line.fontSize * 0.5);
+            while (textWidth > maxWidth && size > minSize) {
+                size -= 0.5;
+                textWidth = font.widthOfTextAtSize(translated, size);
             }
-            page.drawText(line, { x: margin, y, size: fontSize, font, color: rgb(0.08, 0.08, 0.1) });
-            y -= lineHeight;
-            line = '';
-        };
 
-        words2.forEach((word) => {
-            const test = line ? `${line} ${word}` : word;
-            if (font.widthOfTextAtSize(test, fontSize) > maxWidth && line) {
-                flushLine();
-                line = word;
+            if (textWidth > maxWidth) {
+                // Toujours trop long : on renvoie le texte sur des lignes
+                // supplémentaires sous la ligne d'origine plutôt que de le
+                // tronquer.
+                const wrapped = wrapTextLines(translated, font, size, maxWidth);
+                wrapped.forEach((wl, wi) => {
+                    page.drawText(wl, {
+                        x: line.x, y: line.y - wi * size * 1.15, size, font, color: rgb(0.08, 0.08, 0.1),
+                    });
+                });
             } else {
-                line = test;
+                page.drawText(translated, {
+                    x: line.x, y: line.y, size, font, color: rgb(0.08, 0.08, 0.1),
+                });
             }
         });
-        if (line) flushLine();
     }
 
     fs.writeFileSync(outputPath, await outDoc.save());
@@ -899,6 +987,31 @@ async function embedCreateFont(doc, fontSpec, cache) {
 }
 
 // ---- Créateur de PDF (depuis zéro) ----
+// Applique remplissage / bordure à une forme (rect, ellipse, triangle) en
+// fonction des options de style choisies dans l'éditeur (fill, borderEnabled,
+// borderColor, borderWidth). Garantit qu'au moins un rendu visible existe.
+function applyShapeStyle(opts, block) {
+    const { rgb } = ensurePdfLib();
+    const hasFill = block.fill !== false;
+    const hasBorder = !!block.borderEnabled && (block.borderWidth || 0) > 0;
+    if (hasFill) {
+        const [r, g, b] = hexToRgb01(block.color || '#111111');
+        opts.color = rgb(r, g, b);
+    }
+    if (hasBorder) {
+        const [br, bg, bb] = hexToRgb01(block.borderColor || '#111111');
+        opts.borderColor = rgb(br, bg, bb);
+        opts.borderWidth = block.borderWidth;
+    }
+    if (!hasFill && !hasBorder) {
+        // Ni remplissage ni bordure : on force une bordure fine noire pour
+        // éviter une forme totalement invisible dans le PDF généré.
+        opts.borderColor = rgb(0.07, 0.07, 0.07);
+        opts.borderWidth = 1;
+    }
+    return opts;
+}
+
 function pdfPositionToPoints(block, pageHeightPt) {
     // Convertit une position "haut-gauche, y vers le bas" (comme le HTML)
     // vers le repère PDF ("bas-gauche, y vers le haut").
@@ -975,28 +1088,28 @@ async function pdfCreate({ pages, outputPath }) {
                     x: block.x, y: pdfPositionToPoints(block, height), width: block.w, height: block.h,
                 });
             } else if (block.type === 'rect') {
-                const [r, g, b] = hexToRgb01(block.color || '#111111');
-                page.drawRectangle({
-                    x: block.x, y: pdfPositionToPoints(block, height), width: block.w, height: block.h, color: rgb(r, g, b),
-                });
+                const opts = {
+                    x: block.x, y: pdfPositionToPoints(block, height), width: block.w, height: block.h,
+                };
+                applyShapeStyle(opts, block);
+                const radius = Math.max(0, Math.min(block.radius || 0, Math.min(block.w, block.h) / 2));
+                if (radius > 0) { opts.rx = radius; opts.ry = radius; }
+                page.drawRectangle(opts);
             } else if (block.type === 'ellipse') {
-                const [r, g, b] = hexToRgb01(block.color || '#111111');
-                page.drawEllipse({
+                const opts = {
                     x: block.x + block.w / 2,
                     y: pdfPositionToPoints(block, height) + block.h / 2,
                     xScale: block.w / 2,
                     yScale: block.h / 2,
-                    color: rgb(r, g, b),
-                });
+                };
+                applyShapeStyle(opts, block);
+                page.drawEllipse(opts);
             } else if (block.type === 'triangle') {
-                const [r, g, b] = hexToRgb01(block.color || '#111111');
                 const w = block.w; const h = block.h;
                 const svgPath = `M ${w / 2} 0 L ${w} ${h} L 0 ${h} Z`;
-                page.drawSvgPath(svgPath, {
-                    x: block.x,
-                    y: pdfPositionToPoints(block, height) + h,
-                    color: rgb(r, g, b),
-                });
+                const opts = { x: block.x, y: pdfPositionToPoints(block, height) + h };
+                applyShapeStyle(opts, block);
+                page.drawSvgPath(svgPath, opts);
             }
         }
     }
@@ -1066,6 +1179,61 @@ async function pdfConvertFile({ filePath, targetFormat, outputPath }) {
 // ------------------------------------------------------------
 ipcMain.handle('shell:show-in-folder', (_e, filePath) => shell.showItemInFolder(filePath));
 ipcMain.handle('shell:open-path', (_e, filePath) => shell.openPath(filePath));
+
+// ------------------------------------------------------------
+// IPC — Aperçu / impression d'un PDF (à l'intérieur même de l'application)
+// ------------------------------------------------------------
+// Ouvre une fenêtre Electron cachée sur le fichier PDF (le viewer PDF
+// intégré de Chromium sait l'afficher) puis déclenche la boîte de dialogue
+// d'impression native — l'utilisateur n'a jamais besoin de quitter l'appli.
+ipcMain.handle('app:print-file', async (event, filePath) => new Promise((resolve) => {
+    if (!filePath || !fs.existsSync(filePath)) { resolve({ ok: false, error: 'Fichier introuvable.' }); return; }
+    const printWin = new BrowserWindow({
+        show: false,
+        parent: BrowserWindow.fromWebContents(event.sender) || undefined,
+        webPreferences: { sandbox: false },
+    });
+    let settled = false;
+    const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        if (!printWin.isDestroyed()) printWin.close();
+        resolve(result);
+    };
+    printWin.webContents.on('did-finish-load', () => {
+        printWin.webContents.print({ silent: false, printBackground: true }, (success, reason) => {
+            finish(success ? { ok: true } : { ok: false, error: reason || 'Impression annulée.' });
+        });
+    });
+    printWin.webContents.on('did-fail-load', (_ev, _code, desc) => finish({ ok: false, error: desc || 'Chargement du PDF impossible.' }));
+    printWin.loadFile(filePath).catch((err) => finish({ ok: false, error: err.message }));
+    setTimeout(() => finish({ ok: false, error: "Délai d'impression dépassé." }), 120000);
+}));
+
+// ------------------------------------------------------------
+// IPC — Enregistrer une image générée côté renderer (ex : masque
+// d'écrêtage rasterisé) dans un fichier temporaire, pour pouvoir ensuite
+// la référencer par chemin comme n'importe quelle autre image.
+// ------------------------------------------------------------
+const tempImageDir = path.join(os.tmpdir(), 'central-pdf-manager-temp');
+ipcMain.handle('app:get-temp-path', (_e, ext) => {
+    if (!fs.existsSync(tempImageDir)) fs.mkdirSync(tempImageDir, { recursive: true });
+    return path.join(tempImageDir, `preview-${crypto.randomUUID()}.${ext || 'pdf'}`);
+});
+ipcMain.handle('app:save-temp-image', async (_e, { dataUrl }) => {
+    try {
+        const match = /^data:image\/(png|jpeg);base64,(.+)$/.exec(dataUrl || '');
+        if (!match) throw new Error('Format d\'image inattendu.');
+        const ext = match[1] === 'jpeg' ? 'jpg' : 'png';
+        if (!fs.existsSync(tempImageDir)) fs.mkdirSync(tempImageDir, { recursive: true });
+        const filePath = path.join(tempImageDir, `mask-${crypto.randomUUID()}.${ext}`);
+        fs.writeFileSync(filePath, Buffer.from(match[2], 'base64'));
+        return { ok: true, filePath };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+app.on('before-quit', () => { try { fs.rmSync(tempImageDir, { recursive: true, force: true }); } catch { /* tant pis */ } });
 
 // ------------------------------------------------------------
 // IPC — Outils / sélecteurs

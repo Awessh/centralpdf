@@ -37,6 +37,7 @@
                 <button class="tool-btn" data-tool="translate"><i class="fa-solid fa-language"></i><span>Traduire</span></button>
                 <button class="tool-btn" data-tool="create"><i class="fa-solid fa-file-circle-plus"></i><span>Créer</span></button>
                 <button class="tool-btn" data-tool="convert"><i class="fa-solid fa-right-left"></i><span>Convertir</span></button>
+                <button class="tool-btn" data-tool="settings"><i class="fa-solid fa-gear"></i><span>Paramètres</span></button>
                 <button class="tool-btn" data-tool="about"><i class="fa-solid fa-rotate"></i><span>A propos</span></button>
             </nav>
 
@@ -55,8 +56,11 @@
             <!-- ===== Organiser ===== -->
             <section class="panel active" id="panel-organize">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Organiser un PDF</h1>
                     <p>Réordonne, fais pivoter ou supprime des pages — en grille, avec aperçu du contenu.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="organize" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="dropzone" id="organize-dropzone">
@@ -67,6 +71,15 @@
 
                 <div class="workspace hidden" id="organize-workspace">
                     <div class="file-chip" id="organize-file-chip"></div>
+
+                    <div class="field-row organize-bulk-delete">
+                        <div class="field-group">
+                            <label>Supprimer plusieurs pages (ex : 1-10 ou 1-20,45-50)</label>
+                            <input type="text" id="organize-delete-range-input" placeholder="Ex : 1-10,45-50">
+                        </div>
+                        <button class="btn ghost small danger" id="organize-delete-range-btn" style="align-self:flex-end;"><i class="fa-solid fa-trash-can"></i> Supprimer ces pages</button>
+                    </div>
+
                     <div class="page-grid" id="organize-page-grid"></div>
                     <div class="panel-actions">
                         <button class="btn ghost" id="organize-reset-btn"><i class="fa-solid fa-rotate-left"></i> Recommencer</button>
@@ -80,8 +93,11 @@
             <!-- ===== Fusionner ===== -->
             <section class="panel" id="panel-merge">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Fusionner des PDF</h1>
                     <p>Combine plusieurs fichiers PDF en un seul, dans l'ordre de ton choix.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="merge" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="dropzone" id="merge-dropzone">
@@ -103,8 +119,11 @@
             <!-- ===== Compresser ===== -->
             <section class="panel" id="panel-compress">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Compresser un PDF</h1>
                     <p>Réduit la taille du fichier pour l'envoyer ou le stocker plus facilement.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="compress" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="dropzone" id="compress-dropzone">
@@ -141,8 +160,11 @@
             <!-- ===== Scinder ===== -->
             <section class="panel" id="panel-split">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Scinder un PDF</h1>
                     <p>Découpe le document en plusieurs fichiers.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="split" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="dropzone" id="split-dropzone">
@@ -186,8 +208,11 @@
             <!-- ===== Modifier ===== -->
             <section class="panel" id="panel-edit">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Modifier un PDF</h1>
                     <p>Ajoute un texte / filigrane, ou insère des pages blanches.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="edit" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="dropzone" id="edit-dropzone">
@@ -280,8 +305,11 @@
             <!-- ===== Protéger ===== -->
             <section class="panel" id="panel-protect">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Protéger un PDF</h1>
                     <p>Ajoute un mot de passe et des permissions, ou retire une protection existante.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="protect" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="edit-tabs">
@@ -359,8 +387,11 @@
             <!-- ===== Traduire ===== -->
             <section class="panel" id="panel-translate">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Traduire un PDF</h1>
-                    <p>Extrait le texte, le traduit puis génère un nouveau PDF. La mise en page d'origine n'est pas conservée (texte reflowé).</p>
+                    <p>Traduit le texte directement à sa place d'origine : mise en page, images et arrière-plan sont conservés.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="translate" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="dropzone" id="translate-dropzone">
@@ -409,8 +440,11 @@
             <!-- ===== Créer ===== -->
             <section class="panel" id="panel-create">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Créer un PDF</h1>
                     <p>Compose un document à partir de zéro : texte, images, pages multiples.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="create" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <!-- Étape 1 : configuration -->
@@ -458,7 +492,13 @@
                                 <button class="btn ghost small" id="create-add-triangle-btn"><i class="fa-solid fa-play fa-rotate-90"></i> Triangle</button>
                                 <label class="bg-color-label">Fond <input type="color" id="create-bg-color" value="#ffffff"></label>
                                 <button class="btn ghost small danger" id="create-delete-page-btn"><i class="fa-solid fa-trash-can"></i> Supprimer la page</button>
+                                <div class="creator-zoom-group">
+                                    <i class="fa-solid fa-magnifying-glass-minus" id="create-zoom-out-btn" title="Réduire"></i>
+                                    <span id="create-zoom-label">100%</span>
+                                    <i class="fa-solid fa-magnifying-glass-plus" id="create-zoom-in-btn" title="Agrandir"></i>
+                                </div>
                             </div>
+                            <p class="creator-shortcuts-hint">Raccourcis : <kbd>Ctrl</kbd>+<kbd>C</kbd> copier · <kbd>Ctrl</kbd>+<kbd>V</kbd> coller · <kbd>Ctrl</kbd>+<kbd>D</kbd> dupliquer · <kbd>Ctrl</kbd>+<kbd>A</kbd> tout sélectionner · <kbd>Suppr</kbd> supprimer · flèches déplacer (<kbd>Maj</kbd>+flèche = 10px) · <kbd>Échap</kbd> désélectionner · <kbd>Ctrl</kbd>+molette zoomer · cliquer-glisser sélection multiple</p>
                             <div class="creator-stage-wrap">
                                 <div class="creator-stage" id="create-stage"></div>
                             </div>
@@ -479,8 +519,11 @@
             <!-- ===== Convertir ===== -->
             <section class="panel" id="panel-convert">
                 <header class="panel-header">
+                    <div class="panel-header-text">
                     <h1>Conversion PDF</h1>
                     <p>Convertis un document vers ou depuis Word, Excel, PowerPoint et HTML.</p>
+                    </div>
+                    <button class="btn ghost small panel-preview-btn" data-preview-tool="convert" title="Aperçu et impression"><i class="fa-solid fa-eye"></i> Aperçu</button>
                 </header>
 
                 <div class="convert-grid" id="convert-grid">
@@ -505,6 +548,35 @@
                 </div>
 
                 <div class="status-msg hidden" id="convert-status"></div>
+            </section>
+
+            <!-- ===== Paramètres ===== -->
+            <section class="panel" id="panel-settings">
+                <header class="panel-header">
+                    <div class="panel-header-text">
+                    <h1>Paramètres</h1>
+                    <p>Personnalise l'apparence de l'application.</p>
+                    </div>
+                </header>
+
+                <div class="settings-section">
+                    <h3><i class="fa-solid fa-palette"></i> Thème</h3>
+                    <p class="settings-hint">Par défaut, l'application suit le thème de Windows (clair ou sombre) et s'adapte automatiquement s'il change.</p>
+                    <div class="theme-options" id="theme-options">
+                        <button type="button" class="theme-option" data-theme-choice="system">
+                            <i class="fa-solid fa-desktop"></i>
+                            <span>Système</span>
+                        </button>
+                        <button type="button" class="theme-option" data-theme-choice="light">
+                            <i class="fa-solid fa-sun"></i>
+                            <span>Clair</span>
+                        </button>
+                        <button type="button" class="theme-option" data-theme-choice="dark">
+                            <i class="fa-solid fa-moon"></i>
+                            <span>Sombre</span>
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <!-- Onglet À propos -->
@@ -552,6 +624,25 @@
             <div class="modal-actions">
                 <button class="btn ghost" id="confirm-modal-cancel">Annuler</button>
                 <button class="btn primary" id="confirm-modal-ok">Continuer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---------- Modale d'aperçu PDF (avec impression, en-app) ---------- -->
+    <div class="modal-overlay hidden" id="preview-modal">
+        <div class="modal-box preview-modal-box">
+            <div class="preview-modal-header">
+                <h3><i class="fa-solid fa-eye"></i> <span id="preview-modal-title">Aperçu</span></h3>
+                <div class="preview-modal-actions">
+                    <button class="btn ghost small" id="preview-zoom-out-btn" title="Réduire"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+                    <span class="preview-zoom-val" id="preview-zoom-val">100%</span>
+                    <button class="btn ghost small" id="preview-zoom-in-btn" title="Agrandir"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+                    <button class="btn primary small" id="preview-print-btn"><i class="fa-solid fa-print"></i> Imprimer</button>
+                    <button class="btn ghost small" id="preview-close-btn"><i class="fa-solid fa-xmark"></i> Fermer</button>
+                </div>
+            </div>
+            <div class="preview-modal-body" id="preview-modal-body">
+                <div class="preview-modal-loading" id="preview-modal-loading"><i class="fa-solid fa-spinner fa-spin"></i> Chargement de l'aperçu…</div>
             </div>
         </div>
     </div>
